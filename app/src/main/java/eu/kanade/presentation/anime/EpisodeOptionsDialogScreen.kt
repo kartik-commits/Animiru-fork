@@ -86,6 +86,7 @@ import tachiyomi.domain.episode.interactor.GetEpisode
 import tachiyomi.domain.episode.model.Episode
 import tachiyomi.domain.source.service.SourceManager
 import tachiyomi.i18n.MR
+import tachiyomi.i18n.animiru.AMMR
 import tachiyomi.i18n.aniyomi.AYMR
 import tachiyomi.presentation.core.components.material.padding
 import tachiyomi.presentation.core.i18n.stringResource
@@ -536,6 +537,7 @@ private fun VideoList(
                 )
 
                 QualityOptions(
+                    protected = currentVideo.drm != null,
                     onDownloadClicked = { downloadEpisode(useExternalDownloader) },
                     onExtDownloadClicked = { downloadEpisode(!useExternalDownloader) },
                     onCopyClicked = {
@@ -619,6 +621,7 @@ private fun VideoList(
 
 @Composable
 private fun QualityOptions(
+    protected: Boolean,
     onDownloadClicked: () -> Unit = {},
     onExtDownloadClicked: () -> Unit = {},
     onCopyClicked: () -> Unit = {},
@@ -628,38 +631,46 @@ private fun QualityOptions(
     val closeMenu = { EpisodeOptionsDialogScreen.onDismissDialog() }
 
     Column {
-        ClickableRow(
-            text = stringResource(MR.strings.copy),
-            icon = MaterialSymbols.Rounded.ContentCopy,
-            onClick = { onCopyClicked() },
-        )
+        if (protected) {
+            Text(
+                text = stringResource(AMMR.strings.am_protected_export_unsupported),
+                modifier = Modifier.padding(TabbedDialogPaddings.Horizontal),
+                style = MaterialTheme.typography.bodyMedium,
+            )
+        } else {
+            ClickableRow(
+                text = stringResource(MR.strings.copy),
+                icon = MaterialSymbols.Rounded.ContentCopy,
+                onClick = { onCopyClicked() },
+            )
 
-        ClickableRow(
-            text = stringResource(AYMR.strings.action_start_download_internally),
-            icon = MaterialSymbols.Rounded.Download,
-            onClick = {
-                onDownloadClicked()
-                closeMenu()
-            },
-        )
+            ClickableRow(
+                text = stringResource(AYMR.strings.action_start_download_internally),
+                icon = MaterialSymbols.Rounded.Download,
+                onClick = {
+                    onDownloadClicked()
+                    closeMenu()
+                },
+            )
 
-        ClickableRow(
-            text = stringResource(AYMR.strings.action_start_download_externally),
-            icon = MaterialSymbols.Rounded.SystemUpdateAlt,
-            onClick = {
-                onExtDownloadClicked()
-                closeMenu()
-            },
-        )
+            ClickableRow(
+                text = stringResource(AYMR.strings.action_start_download_externally),
+                icon = MaterialSymbols.Rounded.SystemUpdateAlt,
+                onClick = {
+                    onExtDownloadClicked()
+                    closeMenu()
+                },
+            )
 
-        ClickableRow(
-            text = stringResource(AYMR.strings.action_play_externally),
-            icon = MaterialSymbols.AutoMirroredRounded.OpenInNew,
-            onClick = {
-                onExtPlayerClicked()
-                closeMenu()
-            },
-        )
+            ClickableRow(
+                text = stringResource(AYMR.strings.action_play_externally),
+                icon = MaterialSymbols.AutoMirroredRounded.OpenInNew,
+                onClick = {
+                    onExtPlayerClicked()
+                    closeMenu()
+                },
+            )
+        }
 
         ClickableRow(
             text = stringResource(AYMR.strings.action_play_internally),

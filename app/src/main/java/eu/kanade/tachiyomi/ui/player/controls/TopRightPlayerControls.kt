@@ -41,6 +41,12 @@ fun TopRightPlayerControls(
     autoPlayEnabled: Boolean,
     onToggleAutoPlay: (Boolean) -> Unit,
 
+    // capabilities
+    showSubtitles: Boolean = true,
+    showAudio: Boolean = true,
+    showQuality: Boolean = true,
+    showMore: Boolean = true,
+
     // subtitles
     onSubtitlesClick: () -> Unit,
     onSubtitlesLongClick: () -> Unit,
@@ -71,19 +77,23 @@ fun TopRightPlayerControls(
                 .padding(vertical = MaterialTheme.padding.medium, horizontal = MaterialTheme.padding.mediumSmall)
                 .size(width = 48.dp, height = 24.dp),
         )
-        ControlsButton(
-            icon = MaterialSymbols.RoundedFilled.Subtitles,
-            onClick = onSubtitlesClick,
-            onLongClick = onSubtitlesLongClick,
-            horizontalSpacing = MaterialTheme.padding.mediumSmall,
-        )
-        ControlsButton(
-            icon = MaterialSymbols.Rounded.MusicNote,
-            onClick = onAudioClick,
-            onLongClick = onAudioLongClick,
-            horizontalSpacing = MaterialTheme.padding.mediumSmall,
-        )
-        if (isEpisodeOnline == true) {
+        if (showSubtitles) {
+            ControlsButton(
+                icon = MaterialSymbols.RoundedFilled.Subtitles,
+                onClick = onSubtitlesClick,
+                onLongClick = onSubtitlesLongClick,
+                horizontalSpacing = MaterialTheme.padding.mediumSmall,
+            )
+        }
+        if (showAudio) {
+            ControlsButton(
+                icon = MaterialSymbols.Rounded.MusicNote,
+                onClick = onAudioClick,
+                onLongClick = onAudioLongClick,
+                horizontalSpacing = MaterialTheme.padding.mediumSmall,
+            )
+        }
+        if (showQuality && isEpisodeOnline == true) {
             ControlsButton(
                 icon = MaterialSymbols.RoundedFilled.HighQuality,
                 onClick = onQualityClick,
@@ -91,11 +101,13 @@ fun TopRightPlayerControls(
                 horizontalSpacing = MaterialTheme.padding.mediumSmall,
             )
         }
-        ControlsButton(
-            icon = MaterialSymbols.Rounded.MoreVert,
-            onClick = onMoreClick,
-            onLongClick = onMoreLongClick,
-            horizontalSpacing = MaterialTheme.padding.mediumSmall,
-        )
+        if (showMore) {
+            ControlsButton(
+                icon = MaterialSymbols.Rounded.MoreVert,
+                onClick = onMoreClick,
+                onLongClick = onMoreLongClick,
+                horizontalSpacing = MaterialTheme.padding.mediumSmall,
+            )
+        }
     }
 }

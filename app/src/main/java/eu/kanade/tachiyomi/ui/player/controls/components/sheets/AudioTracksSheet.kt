@@ -36,6 +36,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import eu.kanade.tachiyomi.ui.player.PlayerTrack
 import eu.kanade.tachiyomi.ui.player.mpv.MpvVideoTrack
 import eu.kanade.tachiyomi.ui.player.mpv.TrackState
 import mihon.icons.materialsymbols.MaterialSymbols
@@ -47,11 +48,13 @@ import tachiyomi.presentation.core.i18n.stringResource
 
 @Composable
 fun AudioTracksSheet(
-    tracks: List<MpvVideoTrack>,
-    onSelect: (MpvVideoTrack) -> Unit,
+    tracks: List<PlayerTrack>,
+    onSelect: (PlayerTrack) -> Unit,
     onAddAudioTrack: () -> Unit,
     onOpenDelayPanel: () -> Unit,
     onDismissRequest: () -> Unit,
+    allowAddTrack: Boolean = true,
+    allowDelay: Boolean = true,
     modifier: Modifier = Modifier,
 ) {
     GenericTracksSheet(
@@ -61,22 +64,26 @@ fun AudioTracksSheet(
             TrackSheetTitle(
                 title = stringResource(AYMR.strings.pref_player_audio),
                 actions = {
-                    TextButton(onClick = onOpenDelayPanel) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(MaterialTheme.padding.extraSmall),
-                        ) {
-                            Icon(imageVector = MaterialSymbols.Rounded.MoreTime, contentDescription = null)
-                            Text(text = stringResource(AYMR.strings.player_sheets_track_delay))
+                    if (allowDelay) {
+                        TextButton(onClick = onOpenDelayPanel) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(MaterialTheme.padding.extraSmall),
+                            ) {
+                                Icon(imageVector = MaterialSymbols.Rounded.MoreTime, contentDescription = null)
+                                Text(text = stringResource(AYMR.strings.player_sheets_track_delay))
+                            }
                         }
                     }
                 },
             )
 
-            AddTrackRow(
-                title = stringResource(AYMR.strings.player_sheets_add_ext_audio),
-                onClick = onAddAudioTrack,
-            )
+            if (allowAddTrack) {
+                AddTrackRow(
+                    title = stringResource(AYMR.strings.player_sheets_add_ext_audio),
+                    onClick = onAddAudioTrack,
+                )
+            }
         },
         track = {
             AudioTrackRow(
@@ -91,7 +98,7 @@ fun AudioTracksSheet(
 
 @Composable
 fun AudioTrackRow(
-    track: MpvVideoTrack,
+    track: PlayerTrack,
     isSelected: Boolean,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
@@ -114,9 +121,9 @@ fun AudioTrackRow(
             fontStyle = if (isSelected) FontStyle.Italic else FontStyle.Normal,
         )
         Spacer(modifier = Modifier.weight(1f))
-        if (track is MpvVideoTrack.External && track.state == TrackState.Loading) {
+        if (track.loading) {
             CircularProgressIndicator(modifier = Modifier.then(Modifier.size(24.dp)))
-        } else if (track is MpvVideoTrack.External && track.state == TrackState.Error) {
+        } else if (track.error) {
             Icon(MaterialSymbols.Rounded.Error, null, tint = MaterialTheme.colorScheme.error)
         }
     }

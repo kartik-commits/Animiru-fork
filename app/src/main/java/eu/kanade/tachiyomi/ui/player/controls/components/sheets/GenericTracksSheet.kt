@@ -37,6 +37,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import eu.kanade.presentation.player.components.PlayerSheet
+import eu.kanade.tachiyomi.ui.player.PlayerTrack
 import eu.kanade.tachiyomi.ui.player.mpv.MpvVideoTrack
 import mihon.icons.materialsymbols.MaterialSymbols
 import mihon.icons.materialsymbols.rounded.Add
@@ -106,24 +107,35 @@ fun AddTrackRow(
 }
 
 @Composable
-fun getTrackTitle(mpvVideoTrack: MpvVideoTrack): String {
-    return when (mpvVideoTrack) {
+fun getTrackTitle(track: PlayerTrack): String {
+    if (track !is MpvVideoTrack) {
+        return when {
+            track.title.isNotBlank() && track.language.isNotBlank() ->
+                "${track.title} · ${track.language}"
+            track.title.isNotBlank() -> track.title
+            track.language.isNotBlank() -> track.language
+            track.displayId != null -> "#${track.displayId}"
+            else -> "—"
+        }
+    }
+
+    return when (track) {
         is MpvVideoTrack.External -> {
-            val title = mpvVideoTrack.title
-            val hasLang = !mpvVideoTrack.lang.isNullOrBlank()
+            val title = track.title
+            val hasLang = !track.lang.isNullOrBlank()
 
             if (hasLang) {
                 stringResource(
                     AMMR.strings.player_sheets_track_title_w_lang_no_id,
                     title,
-                    mpvVideoTrack.lang,
+                    track.lang,
                 )
             } else {
                 title
             }
         }
         is MpvVideoTrack.Internal -> {
-            val track = mpvVideoTrack.data
+            val track = track.data
 
             val hasTitle = !track.title.isNullOrBlank()
             val hasLang = !track.lang.isNullOrBlank()

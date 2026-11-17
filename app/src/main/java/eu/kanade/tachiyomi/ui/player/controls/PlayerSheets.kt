@@ -26,6 +26,7 @@ import animiru.domain.player.model.AudioChannels
 import animiru.domain.player.model.Decoder
 import dev.vivvvek.seeker.Segment
 import eu.kanade.tachiyomi.ui.player.Panels
+import eu.kanade.tachiyomi.ui.player.PlayerTrack
 import eu.kanade.tachiyomi.ui.player.Sheets
 import eu.kanade.tachiyomi.ui.player.components.ChaptersSheet
 import eu.kanade.tachiyomi.ui.player.components.HosterState
@@ -44,14 +45,14 @@ fun PlayerSheets(
     sheetShown: Sheets,
 
     // subtitles sheet
-    subtitles: List<MpvVideoTrack>,
+    subtitles: List<PlayerTrack>,
     onAddSubtitle: (Uri) -> Unit,
-    onSelectSubtitle: (MpvVideoTrack) -> Unit,
+    onSelectSubtitle: (PlayerTrack) -> Unit,
 
     // audio sheet
-    audioTracks: List<MpvVideoTrack>,
+    audioTracks: List<PlayerTrack>,
     onAddAudio: (Uri) -> Unit,
-    onSelectAudio: (MpvVideoTrack) -> Unit,
+    onSelectAudio: (PlayerTrack) -> Unit,
 
     // video sheet
     isLoadingHosters: Boolean,

@@ -344,6 +344,12 @@ dependencies {
     implementation(libs.apollo)
     implementation(libs.apollo.adapters)
 
+    // AM (MEDIA3_DRM_PLAYER) -->
+    implementation(libs.androidx.media3.exoplayer)
+    implementation(libs.androidx.media3.exoplayer.dash)
+    implementation(libs.androidx.media3.ui)
+    // <-- AM (MEDIA3_DRM_PLAYER)
+
     // Tests
     testImplementation(libs.bundles.test)
     testRuntimeOnly(libs.junit.platform.launcher)

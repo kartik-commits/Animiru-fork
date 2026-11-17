@@ -87,6 +87,7 @@ import mihon.core.metro.metroGraph
 import tachiyomi.core.common.i18n.stringResource
 import tachiyomi.core.common.util.system.logcat
 import tachiyomi.i18n.MR
+import tachiyomi.i18n.animiru.AMMR
 import tachiyomi.i18n.aniyomi.AYMR
 import kotlin.time.Clock
 import kotlin.time.Duration.Companion.seconds
@@ -115,6 +116,12 @@ class PlayerActivity : BaseActivity() {
         packageManager.hasSystemFeature(PackageManager.FEATURE_PICTURE_IN_PICTURE) &&
             playerPreferences.enablePip.get()
     }
+
+    private val isProtectedPlayback: Boolean
+        get() = viewModel.stateData.value.isMedia3Playback
+
+    private val canEnterPictureInPicture: Boolean
+        get() = isPipSupportedAndEnabled && !isProtectedPlayback
 
     private var pipReceiver: BroadcastReceiver? = null
 
@@ -202,7 +209,10 @@ class PlayerActivity : BaseActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         graph.inject(this)
         enableEdgeToEdge()
-        registerSecureActivity(this)
+        // AM (MEDIA3_DRM_PLAYER) -->
+        // The player stays capture-protected for its full lifetime; protection is never downgraded mid-activity.
+        registerSecureActivity(this, forceSecure = true)
+        // <-- AM (MEDIA3_DRM_PLAYER)
         super.onCreate(savedInstanceState)
 
         setupMediaSession()
@@ -221,7 +231,9 @@ class PlayerActivity : BaseActivity() {
             .onEach { event ->
                 when (event) {
                     PlayerViewModel.Event.EnterPip -> {
-                        enterPictureInPictureMode(createPipParams())
+                        if (canEnterPictureInPicture) {
+                            enterPictureInPictureMode(createPipParams())
+                        }
                     }
                     is PlayerViewModel.Event.EpisodeTitle -> {
                         if (isInPictureInPictureMode) {
@@ -234,6 +246,11 @@ class PlayerActivity : BaseActivity() {
                     is PlayerViewModel.Event.InitialEpisodeError -> {
                         setInitialEpisodeError(event.error)
                     }
+                    // AM (MEDIA3_DRM_PLAYER) -->
+                    is PlayerViewModel.Event.Media3Error -> {
+                        showToast(this.stringResource(AMMR.strings.media3_drm_playback_failed, event.errorCode))
+                    }
+                    // <-- AM (MEDIA3_DRM_PLAYER)
                     is PlayerViewModel.Event.SavedImage -> {
                         onSaveImageResult(event.result)
                     }
@@ -271,7 +288,7 @@ class PlayerActivity : BaseActivity() {
                 PlayerScreen(
                     viewModel = viewModel,
                     onBack = {
-                        if (isPipSupportedAndEnabled && !viewModel.playbackData.value.paused &&
+                        if (canEnterPictureInPicture && !viewModel.playbackData.value.paused &&
                             playerPreferences.pipOnExit.get() && !viewModel.stateData.value.isCasting
                         ) {
                             enterPictureInPictureMode(createPipParams())
@@ -300,6 +317,9 @@ class PlayerActivity : BaseActivity() {
     }
 
     override fun onDestroy() {
+        // AM (MEDIA3_DRM_PLAYER) -->
+        viewModel.releaseMedia3Player()
+        // <-- AM (MEDIA3_DRM_PLAYER)
         viewModel.player.release()
         viewModel.stopHttpServer()
 
@@ -324,6 +344,12 @@ class PlayerActivity : BaseActivity() {
             return
         }
 
+        // AM (MEDIA3_DRM_PLAYER) -->
+        if (viewModel.stateData.value.isMedia3Playback) {
+            viewModel.pause()
+            viewModel.suspendMedia3Playback()
+        }
+        // <-- AM (MEDIA3_DRM_PLAYER)
         viewModel.saveHistory()
         viewModel.setPlayerExiting(true)
         if (isFinishing) {
@@ -347,7 +373,7 @@ class PlayerActivity : BaseActivity() {
     }
 
     override fun onUserLeaveHint() {
-        if (isPipSupportedAndEnabled && !viewModel.playbackData.value.paused && playerPreferences.pipOnExit.get()) {
+        if (canEnterPictureInPicture && !viewModel.playbackData.value.paused && playerPreferences.pipOnExit.get()) {
             enterPictureInPictureMode()
         }
         super.onUserLeaveHint()
@@ -393,6 +419,9 @@ class PlayerActivity : BaseActivity() {
         viewModel.setPlayerExiting(false)
         super.onResume()
 
+        // AM (MEDIA3_DRM_PLAYER) -->
+        viewModel.resumeMedia3Playback()
+        // <-- AM (MEDIA3_DRM_PLAYER)
         viewModel.setVolumeTo(
             audioManager.getStreamVolume(AudioManager.STREAM_MUSIC).also {
                 if (it < viewModel.stateData.value.maxVolume) viewModel.changeMPVVolumeTo(100)
@@ -428,7 +457,7 @@ class PlayerActivity : BaseActivity() {
             }
         }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            val autoEnter = playerPreferences.pipOnExit.get()
+            val autoEnter = canEnterPictureInPicture && playerPreferences.pipOnExit.get()
             builder.setAutoEnterEnabled(!viewModel.playbackData.value.paused && autoEnter)
             builder.setSeamlessResizeEnabled(!viewModel.playbackData.value.paused && autoEnter)
         }

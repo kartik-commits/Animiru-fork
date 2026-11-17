@@ -42,6 +42,7 @@ import kotlinx.coroutines.withContext
 import logcat.LogPriority
 import mihon.app.di.appGraph
 import mihon.core.metro.AppCoroutineScope
+import tachiyomi.core.common.i18n.stringResource
 import tachiyomi.core.common.util.system.logcat
 import tachiyomi.domain.anime.interactor.GetAnime
 import tachiyomi.domain.anime.model.Anime
@@ -55,6 +56,7 @@ import tachiyomi.domain.history.model.HistoryUpdate
 import tachiyomi.domain.source.service.SourceManager
 import tachiyomi.domain.track.interactor.GetTracks
 import tachiyomi.domain.track.interactor.UpsertTrack
+import tachiyomi.i18n.animiru.AMMR
 import tachiyomi.i18n.aniyomi.AYMR
 import tachiyomi.source.local.isLocal
 import java.io.File
@@ -113,6 +115,9 @@ class ExternalIntents(
         val video = chosenVideo
             ?: hosterLoader.getBestVideo(source, hosters)
             ?: throw Exception("Video list is empty")
+        if (video.drm != null) {
+            throw Exception(context.stringResource(AMMR.strings.am_protected_export_unsupported))
+        }
 
         var videoUrl = getVideoUrl(source, context, video) ?: return null
 

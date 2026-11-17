@@ -34,4 +34,9 @@ dependencies {
 
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.compose.runtime)
+
+    // AM (MEDIA3_DRM_CONTRACT) -->
+    testImplementation(libs.bundles.test)
+    testRuntimeOnly(libs.junit.platform.launcher)
+    // <-- AM (MEDIA3_DRM_CONTRACT)
 }

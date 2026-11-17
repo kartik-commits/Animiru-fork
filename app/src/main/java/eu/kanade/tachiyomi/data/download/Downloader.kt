@@ -445,6 +445,10 @@ class Downloader(
                 download.video = bestVideo
             }
 
+            if (download.video?.drm != null) {
+                throw Exception(context.stringResource(AMMR.strings.am_protected_download_unsupported))
+            }
+
             withContext(Dispatchers.IO) {
                 getOrDownloadVideoFile(download, tmpDir)
             }
@@ -473,9 +477,13 @@ class Downloader(
         } catch (error: Throwable) {
             if (error is CancellationException) throw error
             // If the video threw, it will resume here
+            tmpDir.delete()
             logcat(LogPriority.ERROR, error)
             download.status = Download.State.ERROR
             notifier.onError(error.message, download.episode.name, download.anime.title, download.anime.id)
+            if (download.video?.drm != null) {
+                removeFromQueue(download)
+            }
         }
     }
 

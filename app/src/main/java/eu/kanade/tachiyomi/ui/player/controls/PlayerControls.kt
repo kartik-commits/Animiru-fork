@@ -35,13 +35,11 @@ import eu.kanade.tachiyomi.ui.player.PlayerUpdates
 import eu.kanade.tachiyomi.ui.player.PlayerViewModel
 import eu.kanade.tachiyomi.ui.player.PlayerViewModel.PlayerEvent
 import eu.kanade.tachiyomi.ui.player.Sheets
-import eu.kanade.tachiyomi.ui.player.controls.components.BrightnessSlider
 import eu.kanade.tachiyomi.ui.player.controls.components.ControlsButton
 import eu.kanade.tachiyomi.ui.player.controls.components.MultipleSpeedPlayerUpdate
 import eu.kanade.tachiyomi.ui.player.controls.components.SeekbarWithTimers
 import eu.kanade.tachiyomi.ui.player.controls.components.TextPlayerUpdate
 import eu.kanade.tachiyomi.ui.player.controls.components.ThumbnailPreview
-import eu.kanade.tachiyomi.ui.player.controls.components.VolumeSlider
 import kotlinx.coroutines.delay
 import mihon.icons.custommaterialsymbols.CustomMaterialSymbols
 import mihon.icons.custommaterialsymbols.rounded.ResetZoom
@@ -70,6 +68,7 @@ fun PlayerControls(
     readAhead: Float?,
     remaining: Int?,
     playbackSpeed: Float?,
+    capabilities: PlayerControlCapabilities = PlayerControlCapabilities(),
     modifier: Modifier = Modifier,
 ) {
     val transparentOverlay by animateFloatAsState(
@@ -95,7 +94,6 @@ fun PlayerControls(
                 .padding(horizontal = MaterialTheme.padding.medium),
         ) {
             val (topLeftControls, topRightControls) = createRefs()
-            val (volumeSlider, brightnessSlider) = createRefs()
             val unlockControlsButton = createRef()
             val (bottomRightControls, bottomLeftControls) = createRefs()
             val centerControls = createRef()
@@ -104,94 +102,6 @@ fun PlayerControls(
             val (playerUpdates) = createRefs()
             val skipButton = createRef()
             val resetTransform = createRef()
-
-            LaunchedEffect(playbackData.currentVolume, mpvVolume, uiData.isVolumeSliderShown) {
-                delay(2.seconds)
-                if (uiData.isVolumeSliderShown) onPlayerEvent(PlayerEvent.ShowVolumeSlider(false))
-            }
-            LaunchedEffect(playbackData.currentBrightness, uiData.isBrightnessSliderShown) {
-                delay(2.seconds)
-                if (uiData.isBrightnessSliderShown) onPlayerEvent(PlayerEvent.ShowBrightnessSlider(false))
-            }
-            AnimatedVisibility(
-                visible = uiData.isBrightnessSliderShown,
-                enter = if (!uiData.reduceMotion) {
-                    slideInHorizontally(playerControlsEnterAnimationSpec()) {
-                        if (uiData.swapVolumeAndBrightness) it else -it
-                    } +
-                        fadeIn(
-                            playerControlsEnterAnimationSpec(),
-                        )
-                } else {
-                    fadeIn(playerControlsEnterAnimationSpec())
-                },
-                exit = if (!uiData.reduceMotion) {
-                    slideOutHorizontally(playerControlsExitAnimationSpec()) {
-                        if (uiData.swapVolumeAndBrightness) it else -it
-                    } +
-                        fadeOut(
-                            playerControlsExitAnimationSpec(),
-                        )
-                } else {
-                    fadeOut(playerControlsExitAnimationSpec())
-                },
-                modifier = Modifier.constrainAs(brightnessSlider) {
-                    if (uiData.swapVolumeAndBrightness) {
-                        start.linkTo(parent.start, MaterialTheme.padding.medium)
-                    } else {
-                        end.linkTo(parent.end, MaterialTheme.padding.medium)
-                    }
-                    top.linkTo(parent.top)
-                    bottom.linkTo(parent.bottom)
-                },
-            ) {
-                BrightnessSlider(
-                    brightness = playbackData.currentBrightness,
-                    positiveRange = 0f..1f,
-                    negativeRange = 0f..0.75f,
-                )
-            }
-
-            AnimatedVisibility(
-                visible = uiData.isVolumeSliderShown,
-                enter = if (!uiData.reduceMotion) {
-                    slideInHorizontally(playerControlsEnterAnimationSpec()) {
-                        if (uiData.swapVolumeAndBrightness) it else -it
-                    } +
-                        fadeIn(
-                            playerControlsEnterAnimationSpec(),
-                        )
-                } else {
-                    fadeIn(playerControlsEnterAnimationSpec())
-                },
-                exit = if (!uiData.reduceMotion) {
-                    slideOutHorizontally(playerControlsExitAnimationSpec()) {
-                        if (uiData.swapVolumeAndBrightness) it else -it
-                    } +
-                        fadeOut(
-                            playerControlsExitAnimationSpec(),
-                        )
-                } else {
-                    fadeOut(playerControlsExitAnimationSpec())
-                },
-                modifier = Modifier.constrainAs(volumeSlider) {
-                    if (uiData.swapVolumeAndBrightness) {
-                        end.linkTo(parent.end, MaterialTheme.padding.medium)
-                    } else {
-                        start.linkTo(parent.start, MaterialTheme.padding.medium)
-                    }
-                    top.linkTo(parent.top)
-                    bottom.linkTo(parent.bottom)
-                },
-            ) {
-                VolumeSlider(
-                    volume = playbackData.currentVolume,
-                    mpvVolume = mpvVolume ?: 100,
-                    range = 0..stateData.maxVolume,
-                    boostRange = if (uiData.boostCap > 0) 0..uiData.boostCap else null,
-                    displayAsPercentage = uiData.displayVolumeAsPercentage,
-                )
-            }
 
             LaunchedEffect(uiData.playerUpdate) {
                 if (uiData.playerUpdate is PlayerUpdates.DoubleSpeed || uiData.playerUpdate is PlayerUpdates.None) {
@@ -367,6 +277,10 @@ fun PlayerControls(
                 TopRightPlayerControls(
                     autoPlayEnabled = uiData.autoPlayEnabled,
                     onToggleAutoPlay = { onPlayerEvent(PlayerEvent.SetAutoPlay(it)) },
+                    showSubtitles = capabilities.subtitles,
+                    showAudio = capabilities.audioTracks,
+                    showQuality = capabilities.quality,
+                    showMore = capabilities.more,
                     onSubtitlesClick = { onPlayerEvent(PlayerEvent.SetSheet(Sheets.SubtitleTracks)) },
                     onSubtitlesLongClick = { onPlayerEvent(PlayerEvent.SetPanel(Panels.SubtitleSettings)) },
                     onAudioClick = { onPlayerEvent(PlayerEvent.SetSheet(Sheets.AudioTracks)) },
@@ -452,10 +366,11 @@ fun PlayerControls(
                 },
             ) {
                 BottomRightPlayerControls(
-                    castEnabled = uiData.enableCast,
+                    castEnabled = capabilities.cast && uiData.enableCast,
                     castLoading = stateData.isLoadingCasting,
                     castError = stateData.isErrorCasting,
-                    isPipAvailable = stateData.isPipAvailable,
+                    isPipAvailable = capabilities.pictureInPicture && stateData.isPipAvailable,
+                    showAspectRatio = capabilities.aspectRatio,
                     onPipClick = { onPlayerEvent(PlayerEvent.EnterPip) },
                     onScrenshotClick = { onPlayerEvent(PlayerEvent.SetSheet(Sheets.Screenshot)) },
                     onAspectClick = { onPlayerEvent(PlayerEvent.ChangeAspect) },

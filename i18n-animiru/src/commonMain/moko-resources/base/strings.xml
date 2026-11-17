@@ -1,5 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <!-- AM (MEDIA3_PROTOTYPE) -->
+    <string name="pref_media3_test">Media3 Widevine test</string>
+    <string name="pref_media3_test_summary">Debug-only public test stream. No account required.</string>
+    <string name="media3_drm_playback_failed">Protected playback failed (%1$s)</string>
+    <!-- AM (MEDIA3_PROTOTYPE) end -->
     <string name="action_filter_fillermarked">Fillermarked</string>
     <string name="pref_show_downloaded_episode_file_size">Show downloaded episode file size</string>
     <string name="skipped_reason_not_caught_up_anime">Skipped because there are unseen episodes</string>
@@ -41,6 +46,8 @@
     <string name="am.dialog_with_checkbox_reset">Reset all episodes for this entry</string>
     <string name="am.download_insufficient_space">Couldn\'t download episodes due to low storage space</string>
     <string name="am.download_notifier_unknown_error">Could not download episode due to unexpected error</string>
+    <string name="am.protected_download_unsupported">Protected videos cannot be downloaded</string>
+    <string name="am.protected_export_unsupported">Protected video: download and export unavailable</string>
     <string name="am.channel_new_episodes">Episode updates</string>
     <string name="am.pref_display_images_description">Render images in anime descriptions</string>
     <string name="am.migrationConfigScreen.hideWithoutUpdatesTitle">Hide entries without newer episodes</string>

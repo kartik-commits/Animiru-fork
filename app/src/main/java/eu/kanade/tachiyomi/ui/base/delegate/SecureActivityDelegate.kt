@@ -23,7 +23,9 @@ import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
 
 interface SecureActivityDelegate {
-    fun registerSecureActivity(activity: AppCompatActivity)
+    // AM (MEDIA3_PROTOTYPE) -->
+    fun registerSecureActivity(activity: AppCompatActivity, forceSecure: Boolean = false)
+    // <-- AM (MEDIA3_PROTOTYPE)
 
     companion object {
         /**
@@ -82,11 +84,16 @@ class SecureActivityDelegateImpl : SecureActivityDelegate, DefaultLifecycleObser
 
     @Inject private lateinit var securityPreferences: SecurityPreferences
 
-    override fun registerSecureActivity(activity: AppCompatActivity) {
+    // AM (MEDIA3_PROTOTYPE) -->
+    private var forceSecure = false
+
+    override fun registerSecureActivity(activity: AppCompatActivity, forceSecure: Boolean) {
         this.activity = activity
+        this.forceSecure = forceSecure
         Injekt.get<Context>().appGraph.inject(this)
         activity.lifecycle.addObserver(this)
     }
+    // <-- AM (MEDIA3_PROTOTYPE)
 
     override fun onCreate(owner: LifecycleOwner) {
         setSecureScreen()
@@ -100,8 +107,11 @@ class SecureActivityDelegateImpl : SecureActivityDelegate, DefaultLifecycleObser
         val secureScreenFlow = securityPreferences.secureScreen.changes()
         val incognitoModeFlow = preferences.incognitoMode.changes()
         combine(secureScreenFlow, incognitoModeFlow) { secureScreen, incognitoMode ->
-            secureScreen == SecurityPreferences.SecureScreenMode.ALWAYS ||
+            // AM (MEDIA3_PROTOTYPE) -->
+            // A protected player must not lose FLAG_SECURE when preferences change.
+            forceSecure || secureScreen == SecurityPreferences.SecureScreenMode.ALWAYS ||
                 (secureScreen == SecurityPreferences.SecureScreenMode.INCOGNITO && incognitoMode)
+            // <-- AM (MEDIA3_PROTOTYPE)
         }
             .onEach(activity.window::setSecureScreen)
             .launchIn(activity.lifecycleScope)

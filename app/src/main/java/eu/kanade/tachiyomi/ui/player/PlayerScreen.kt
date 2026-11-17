@@ -16,13 +16,17 @@ import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalViewConfiguration
+import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.graphics.toColorInt
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.media3.ui.PlayerView
 import animiru.domain.player.model.AudioChannels
 import animiru.domain.player.model.DebandSettings
 import animiru.domain.player.model.Debanding
@@ -44,19 +48,26 @@ import eu.kanade.tachiyomi.ui.player.cast.components.CastSheets
 import eu.kanade.tachiyomi.ui.player.components.BrightnessOverlay
 import eu.kanade.tachiyomi.ui.player.components.MpvSurface
 import eu.kanade.tachiyomi.ui.player.components.OrientationOverlay
+import eu.kanade.tachiyomi.ui.player.components.QualitySheet
 import eu.kanade.tachiyomi.ui.player.components.SystemAwakeOverlay
 import eu.kanade.tachiyomi.ui.player.components.SystemBarOverlay
 import eu.kanade.tachiyomi.ui.player.controls.GestureHandler
 import eu.kanade.tachiyomi.ui.player.controls.LocalPlayerButtonsClickEvent
+import eu.kanade.tachiyomi.ui.player.controls.PlayerControlCapabilities
 import eu.kanade.tachiyomi.ui.player.controls.PlayerControls
 import eu.kanade.tachiyomi.ui.player.controls.PlayerDialogs
 import eu.kanade.tachiyomi.ui.player.controls.PlayerPanels
 import eu.kanade.tachiyomi.ui.player.controls.PlayerSheets
+import eu.kanade.tachiyomi.ui.player.controls.VolumeBrightnessFeedback
+import eu.kanade.tachiyomi.ui.player.controls.VolumeBrightnessTouchListener
 import eu.kanade.tachiyomi.ui.player.controls.components.DoubleTapToSeekOvals
 import eu.kanade.tachiyomi.ui.player.controls.components.panels.SubColorType
 import eu.kanade.tachiyomi.ui.player.controls.components.panels.resetColors
 import eu.kanade.tachiyomi.ui.player.controls.components.panels.resetTypography
 import eu.kanade.tachiyomi.ui.player.controls.components.panels.toColorHexString
+import eu.kanade.tachiyomi.ui.player.controls.components.sheets.AudioTracksSheet
+import eu.kanade.tachiyomi.ui.player.controls.components.sheets.PlaybackSpeedSheet
+import eu.kanade.tachiyomi.ui.player.controls.components.sheets.SubtitlesSheet
 import eu.kanade.tachiyomi.ui.player.controls.components.sheets.toFixed
 import eu.kanade.tachiyomi.ui.player.mpv.MpvVideoTrack
 import kotlinx.coroutines.delay
@@ -97,8 +108,10 @@ fun PlayerScreen(
     val showFailedHosters by playerPreferences.showFailedHosters.collectAsState()
     val emptyHosters by playerPreferences.showEmptyHosters.collectAsState()
     val speedPresets by playerPreferences.speedPresets.collectAsState()
+    val gestureVolumeBrightness by appGraph.gesturePreferences.gestureVolumeBrightness.collectAsState()
     val relativeTime by uiPreferences.relativeTime.collectAsState()
     val dateFormat by uiPreferences.dateFormat.collectAsState()
+    val isLandscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
 
     var hasNavigatedBack by remember { mutableStateOf(false) }
 
@@ -215,6 +228,161 @@ fun PlayerScreen(
                 onSkipIntroLengthChange = viewModel::castSetSkipIntroLength,
                 onDismissRequest = { viewModel.setCastDialog(CastDialog.None) },
             )
+            // AM (MEDIA3_DRM_PLAYER) -->
+        } else if (stateData.isMedia3Playback) {
+            val currentUiData by rememberUpdatedState(uiData)
+            val currentPlaybackData by rememberUpdatedState(playbackData)
+            val currentGesturesEnabled by rememberUpdatedState(gestureVolumeBrightness)
+            val touchSlop = LocalViewConfiguration.current.touchSlop
+            AndroidView(
+                modifier = Modifier.fillMaxSize(),
+                factory = { context ->
+                    PlayerView(context).apply {
+                        useController = false
+                        setShowBuffering(PlayerView.SHOW_BUFFERING_WHEN_PLAYING)
+                        setKeepContentOnPlayerReset(false)
+                        setOnTouchListener(
+                            VolumeBrightnessTouchListener(
+                                touchSlop = touchSlop,
+                                enabled = { currentGesturesEnabled },
+                                swapSides = { currentUiData.swapVolumeAndBrightness },
+                                currentVolume = { currentPlaybackData.currentVolume },
+                                maxVolume = { stateData.maxVolume },
+                                currentBrightness = { currentPlaybackData.currentBrightness },
+                                systemBrightness = viewModel::getSystemBrightness,
+                                onVolumeChanged = {
+                                    viewModel.changeVolumeTo(it)
+                                    viewModel.displayVolumeSlider(true)
+                                },
+                                onBrightnessChanged = {
+                                    viewModel.changeBrightnessTo(it)
+                                    viewModel.displayBrightnessSlider(true)
+                                },
+                            ),
+                        )
+                        viewModel.media3Player.attach(this)
+                    }
+                },
+                update = { view -> viewModel.media3Player.attach(view) },
+                onRelease = viewModel.media3Player::detach,
+            )
+            val zoomEnabled by gesturePreferences.gestureZoom.collectAsState()
+            val panEnabled by gesturePreferences.gesturePan.collectAsState()
+            val longPressEnabled by gesturePreferences.gestureLongPress.collectAsState()
+            GestureHandler(
+                modifier = Modifier.fillMaxSize(),
+                zoomEnabled = zoomEnabled,
+                panEnabled = panEnabled,
+                longPressEnabled = longPressEnabled,
+                areControlsLocked = uiData.isControlsLocked,
+                onGestureEvent = viewModel::handleGestureEvent,
+                interactionSource = interactionSource,
+            )
+            DoubleTapToSeekOvals(
+                amount = playbackData.doubleTapSeekAmount,
+                text = playbackData.seekText,
+                interactionSource = interactionSource,
+            )
+            VolumeBrightnessFeedback(
+                stateData = stateData,
+                uiData = uiData,
+                playbackData = playbackData,
+                onVolumeVisibilityChange = viewModel::displayVolumeSlider,
+                onBrightnessVisibilityChange = viewModel::displayBrightnessSlider,
+            )
+            CompositionLocalProvider(
+                LocalRippleConfiguration provides playerRippleConfiguration,
+                LocalContentColor provides Color.White,
+            ) {
+                PlayerControls(
+                    isLandscape = isLandscape,
+                    stateData = stateData,
+                    uiData = uiData,
+                    playbackData = playbackData,
+                    onBack = onBack,
+                    onPlayerEvent = viewModel::handlePlayerEvent,
+                    mpvVolume = null,
+                    pausedForCache = null,
+                    coreIdle = null,
+                    readAhead = null,
+                    remaining = null,
+                    playbackSpeed = uiData.playerSpeedPref,
+                    capabilities = PlayerControlCapabilities.Media3Drm.copy(
+                        subtitles = stateData.media3SubtitleTracks.isNotEmpty(),
+                        audioTracks = stateData.media3AudioTracks.isNotEmpty(),
+                    ),
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
+            when (uiData.sheetShown) {
+                Sheets.PlaybackSpeed -> PlaybackSpeedSheet(
+                    pitchCorrection = false,
+                    onPitchCorrectionChange = { },
+                    speed = uiData.playerSpeedPref,
+                    speedPresets = speedPresets.map { it.toFloat() }.sorted(),
+                    onSpeedChange = { viewModel.handlePlayerEvent(PlayerEvent.ChangeSpeed(it)) },
+                    onAddSpeedPreset = { playerPreferences.speedPresets += it.toFixed(2).toString() },
+                    onRemoveSpeedPreset = { playerPreferences.speedPresets -= it.toFixed(2).toString() },
+                    onResetPresets = playerPreferences.speedPresets::delete,
+                    onMakeDefault = { playerPreferences.playerSpeed.set(it.toFixed(2)) },
+                    onResetDefault = {
+                        viewModel.handlePlayerEvent(
+                            PlayerEvent.ChangeSpeed(playerPreferences.playerSpeed.deleteAndGet()),
+                        )
+                    },
+                    onDismissRequest = { viewModel.setSheet(Sheets.None) },
+                )
+                Sheets.SubtitleTracks -> SubtitlesSheet(
+                    tracks = stateData.media3SubtitleTracks,
+                    onSelect = viewModel::selectMedia3Track,
+                    onAddSubtitle = { },
+                    onOpenSubtitleSettings = { },
+                    onOpenSubtitleDelay = { },
+                    onDismissRequest = { viewModel.setSheet(Sheets.None) },
+                    allowAddTrack = false,
+                    allowSettings = false,
+                )
+                Sheets.AudioTracks -> AudioTracksSheet(
+                    tracks = stateData.media3AudioTracks,
+                    onSelect = viewModel::selectMedia3Track,
+                    onAddAudioTrack = { },
+                    onOpenDelayPanel = { },
+                    onDismissRequest = { viewModel.setSheet(Sheets.None) },
+                    allowAddTrack = false,
+                    allowDelay = false,
+                )
+                Sheets.QualityTracks -> QualitySheet(
+                    isLoadingHosters = uiData.isLoadingHosters,
+                    hosterState = stateData.hosterState,
+                    expandedState = uiData.hosterExpandedList,
+                    selectedVideoIndex = uiData.selectedHosterVideoIndex,
+                    onClickHoster = viewModel::onHosterClicked,
+                    onClickVideo = viewModel::onVideoClicked,
+                    displayHosters = Pair(showFailedHosters, emptyHosters),
+                    onDismissRequest = { viewModel.setSheet(Sheets.None) },
+                    dismissSheet = uiData.dismissSheet,
+                )
+                else -> Unit
+            }
+            PlayerDialogs(
+                dialogShown = uiData.dialogShown,
+                episodeDisplayMode = stateData.currentAnime?.displayMode,
+                currentEpisodeIndex = stateData.currentPlaylistIndex,
+                episodeList = stateData.currentPlaylist,
+                dateRelativeTime = relativeTime,
+                dateFormat = dateFormat,
+                onBookmarkClicked = viewModel::bookmarkEpisode,
+                onFillermarkClicked = viewModel::fillermarkEpisode,
+                onEpisodeClicked = {
+                    viewModel.setDialog(Dialogs.None)
+                    viewModel.changeEpisode(it)
+                },
+                onDismissRequest = { viewModel.setDialog(Dialogs.None) },
+            )
+            SystemAwakeOverlay(paused = playbackData.paused)
+            BrightnessOverlay(brightness = playbackData.currentBrightness)
+            BackHandler(onBack = onBack)
+            // <-- AM (MEDIA3_DRM_PLAYER)
         } else {
             val mpvVolume by viewModel.propFlow<Int>("volume").collectAsStateWithLifecycle()
             val pausedForCache by viewModel.propFlow<Boolean>("paused-for-cache").collectAsStateWithLifecycle()
@@ -222,9 +390,6 @@ fun PlayerScreen(
             val readAhead by viewModel.propFlow<Float>("demuxer-cache-time").collectAsStateWithLifecycle()
             val remaining by viewModel.propFlow<Int>("playtime-remaining").collectAsStateWithLifecycle()
             val playbackSpeed by viewModel.propFlow<Float>("speed").collectAsStateWithLifecycle()
-
-            val configuration = LocalConfiguration.current
-            val isLandscape = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
 
             MpvSurface(
                 modifier = Modifier.fillMaxSize(),
@@ -265,6 +430,15 @@ fun PlayerScreen(
 
             BrightnessOverlay(
                 brightness = playbackData.currentBrightness,
+            )
+
+            VolumeBrightnessFeedback(
+                stateData = stateData,
+                uiData = uiData,
+                playbackData = playbackData,
+                mpvVolume = mpvVolume,
+                onVolumeVisibilityChange = viewModel::displayVolumeSlider,
+                onBrightnessVisibilityChange = viewModel::displayBrightnessSlider,
             )
 
             SystemBarOverlay(
@@ -327,10 +501,10 @@ fun PlayerScreen(
                     sheetShown = uiData.sheetShown,
                     subtitles = subtitles,
                     onAddSubtitle = viewModel::addSubtitle,
-                    onSelectSubtitle = viewModel::selectSub,
+                    onSelectSubtitle = { (it as? MpvVideoTrack)?.let(viewModel::selectSub) },
                     audioTracks = audioTracks,
                     onAddAudio = viewModel::addAudio,
-                    onSelectAudio = viewModel::selectAudio,
+                    onSelectAudio = { (it as? MpvVideoTrack)?.let { track -> viewModel.selectAudio(track) } },
                     isLoadingHosters = uiData.isLoadingHosters,
                     hosterState = stateData.hosterState,
                     expandedState = uiData.hosterExpandedList,

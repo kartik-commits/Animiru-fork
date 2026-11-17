@@ -55,7 +55,9 @@ internal object ExtensionLoader {
     private const val METADATA_CONTENT_WARNING = "aniyomix.contentWarning"
     private const val METADATA_IS_TORRENT = "aniyomix.torrent"
 
-    private val SUPPORTED_LIB_VERSIONS = listOf(14.0, 16.0, 17.0)
+    // AM (MEDIA3_DRM_CONTRACT) -->
+    private val SUPPORTED_LIB_VERSIONS = listOf(14.0, 16.0, 17.0, 18.0)
+    // <-- AM (MEDIA3_DRM_CONTRACT)
     // <-- AY
 
     @Suppress("DEPRECATION")
@@ -366,7 +368,7 @@ internal object ExtensionLoader {
             ?: versionName.substringBeforeLast('.').toDoubleOrNull()
         if (libVersion == null || libVersion !in SUPPORTED_LIB_VERSIONS) {
             logcat(LogPriority.WARN) {
-                "Lib version is $libVersion, while only version(s) ${SUPPORTED_LIB_VERSIONS.joinToString()} are supporteda"
+                "Lib version is $libVersion, while only version(s) ${SUPPORTED_LIB_VERSIONS.joinToString()} are supported"
             }
             return notLoaded(Extension.NotLoaded.Reason.UnsupportedLibVersion, libVersion)
         }

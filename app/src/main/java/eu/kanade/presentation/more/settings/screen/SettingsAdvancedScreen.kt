@@ -26,6 +26,7 @@ import eu.kanade.domain.base.BasePreferences
 import eu.kanade.presentation.more.settings.Preference
 import eu.kanade.presentation.more.settings.screen.advanced.ClearDatabaseScreen
 import eu.kanade.presentation.more.settings.screen.debug.DebugInfoScreen
+import eu.kanade.tachiyomi.BuildConfig
 import eu.kanade.tachiyomi.data.library.MetadataUpdateWorker
 import eu.kanade.tachiyomi.network.NetworkPreferences
 import eu.kanade.tachiyomi.network.PREF_DOH_360
@@ -111,6 +112,18 @@ object SettingsAdvancedScreen : SearchableSettings {
                 title = stringResource(MR.strings.pref_debug_info),
                 onClick = { navigator.push(DebugInfoScreen()) },
             ),
+            // AM (MEDIA3_PROTOTYPE) -->
+            Preference.PreferenceItem.TextPreference(
+                title = stringResource(AMMR.strings.pref_media3_test),
+                subtitle = stringResource(AMMR.strings.pref_media3_test_summary),
+                visible = BuildConfig.DEBUG,
+                onClick = {
+                    context.startActivity(
+                        Intent().setClassName(context, "eu.kanade.tachiyomi.ui.debug.Media3TestActivity"),
+                    )
+                },
+            ),
+            // <-- AM (MEDIA3_PROTOTYPE)
             Preference.PreferenceItem.TextPreference(
                 title = stringResource(MR.strings.pref_onboarding_guide),
                 onClick = { navigator.push(OnboardingScreen()) },

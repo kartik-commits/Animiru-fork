@@ -45,6 +45,9 @@ data class Video(
     val internalData: String = "",
     val initialized: Boolean = false,
     val memo: JsonObject = JsonObject.EMPTY,
+    // AM (MEDIA3_DRM_CONTRACT) -->
+    val drm: VideoDrm? = null,
+    // <-- AM (MEDIA3_DRM_CONTRACT)
 ) {
 
     // TODO(16): Remove after ext lib bump
@@ -87,6 +90,31 @@ data class Video(
         headers: Headers? = null,
     ) : this(url, quality, videoUrl, headers)
 
+    // AM (MEDIA3_DRM_CONTRACT) -->
+    // Ext lib 17 constructor. A defaulted overload also preserves its old synthetic mask descriptor.
+    @Deprecated("Used only for compatibility with ext lib 17, do not use", level = DeprecationLevel.HIDDEN)
+    constructor(
+        videoUrl: String = "",
+        videoTitle: String = "",
+        resolution: Int? = null,
+        bitrate: Int? = null,
+        headers: Headers? = null,
+        preferred: Boolean = false,
+        subtitleTracks: List<Track> = emptyList(),
+        audioTracks: List<Track> = emptyList(),
+        timestamps: List<TimeStamp> = emptyList(),
+        mpvArgs: List<Pair<String, String>> = emptyList(),
+        ffmpegStreamArgs: List<Pair<String, String>> = emptyList(),
+        ffmpegVideoArgs: List<Pair<String, String>> = emptyList(),
+        internalData: String = "",
+        initialized: Boolean = false,
+        memo: JsonObject = JsonObject.EMPTY,
+    ) : this(
+        videoUrl, videoTitle, resolution, bitrate, headers, preferred, subtitleTracks, audioTracks, timestamps, mpvArgs,
+        ffmpegStreamArgs, ffmpegVideoArgs, internalData, initialized, memo, null,
+    )
+    // <-- AM (MEDIA3_DRM_CONTRACT)
+
     // Ext lib 16 constructor
     @Deprecated("Used only for compatibility with ext lib 16, do not use", level = DeprecationLevel.HIDDEN)
     constructor(
@@ -108,6 +136,45 @@ data class Video(
         videoUrl, videoTitle, resolution, bitrate, headers, preferred, subtitleTracks, audioTracks, timestamps, mpvArgs,
         ffmpegStreamArgs, ffmpegVideoArgs, internalData, initialized, JsonObject.EMPTY,
     )
+
+    // AM (MEDIA3_DRM_CONTRACT) -->
+    // Ext lib 17 copy. Preserve state unknown to old callers.
+    @Deprecated("Used only for compatibility with ext lib 17, do not use", level = DeprecationLevel.HIDDEN)
+    fun copy(
+        videoUrl: String = this.videoUrl,
+        videoTitle: String = this.videoTitle,
+        resolution: Int? = this.resolution,
+        bitrate: Int? = this.bitrate,
+        headers: Headers? = this.headers,
+        preferred: Boolean = this.preferred,
+        subtitleTracks: List<Track> = this.subtitleTracks,
+        audioTracks: List<Track> = this.audioTracks,
+        timestamps: List<TimeStamp> = this.timestamps,
+        mpvArgs: List<Pair<String, String>> = this.mpvArgs,
+        ffmpegStreamArgs: List<Pair<String, String>> = this.ffmpegStreamArgs,
+        ffmpegVideoArgs: List<Pair<String, String>> = this.ffmpegVideoArgs,
+        internalData: String = this.internalData,
+        initialized: Boolean = this.initialized,
+        memo: JsonObject = this.memo,
+    ): Video = Video(
+        videoUrl = videoUrl,
+        videoTitle = videoTitle,
+        resolution = resolution,
+        bitrate = bitrate,
+        headers = headers,
+        preferred = preferred,
+        subtitleTracks = subtitleTracks,
+        audioTracks = audioTracks,
+        timestamps = timestamps,
+        mpvArgs = mpvArgs,
+        ffmpegStreamArgs = ffmpegStreamArgs,
+        ffmpegVideoArgs = ffmpegVideoArgs,
+        internalData = internalData,
+        initialized = initialized,
+        memo = memo,
+        drm = drm,
+    )
+    // <-- AM (MEDIA3_DRM_CONTRACT)
 
     // Ext lib 16 copy video
     @Deprecated("Used only for compatibility with ext lib 16, do not use", level = DeprecationLevel.HIDDEN)
@@ -141,8 +208,41 @@ data class Video(
         ffmpegVideoArgs = ffmpegVideoArgs,
         internalData = internalData,
         initialized = initialized,
-        memo = JsonObject.EMPTY,
+        // AM (MEDIA3_DRM_CONTRACT) -->
+        memo = memo,
+        drm = drm,
+        // <-- AM (MEDIA3_DRM_CONTRACT)
     )
+
+    // AM (MEDIA3_DRM_CONTRACT) -->
+    // Ext lib 14 data-class copy bridge. Preserve fields unknown to v14 callers.
+    @Deprecated("Used only for compatibility with ext lib 14, do not use", level = DeprecationLevel.HIDDEN)
+    fun copy(
+        url: String = this.url,
+        quality: String = this.quality,
+        videoUrl: String? = this.videoUrl,
+        headers: Headers? = this.headers,
+        subtitleTracks: List<Track> = this.subtitleTracks,
+        audioTracks: List<Track> = this.audioTracks,
+    ): Video = Video(
+        videoUrl = videoUrl ?: "null",
+        videoTitle = quality,
+        resolution = resolution,
+        bitrate = bitrate,
+        headers = headers,
+        preferred = preferred,
+        subtitleTracks = subtitleTracks,
+        audioTracks = audioTracks,
+        timestamps = timestamps,
+        mpvArgs = mpvArgs,
+        ffmpegStreamArgs = ffmpegStreamArgs,
+        ffmpegVideoArgs = ffmpegVideoArgs,
+        internalData = internalData,
+        initialized = initialized,
+        memo = memo,
+        drm = drm,
+    ).also { it.videoPageUrl = url }
+    // <-- AM (MEDIA3_DRM_CONTRACT)
 
     @Transient
     @Volatile
@@ -193,6 +293,19 @@ data class Video(
     }
 }
 
+// AM (MEDIA3_DRM_CONTRACT) -->
+@Serializable
+data class SerializableVideoDrm(
+    val scheme: VideoDrmScheme,
+    // Decode and discard credentials from state written by earlier prototype builds.
+    val licenseUrl: String? = null,
+    val licenseHeaders: List<Pair<String, String>>? = null,
+) {
+    override fun toString(): String =
+        "SerializableVideoDrm(scheme=$scheme, licenseUrl=<redacted>, licenseHeaders=<redacted>)"
+}
+// <-- AM (MEDIA3_DRM_CONTRACT)
+
 @Serializable
 data class SerializableVideo(
     val videoUrl: String = "",
@@ -210,6 +323,9 @@ data class SerializableVideo(
     val internalData: String = "",
     val initialized: Boolean = false,
     val memo: JsonObject = JsonObject.EMPTY,
+    // AM (MEDIA3_DRM_CONTRACT) -->
+    val drm: SerializableVideoDrm? = null,
+    // <-- AM (MEDIA3_DRM_CONTRACT)
 ) {
 
     companion object {
@@ -232,6 +348,9 @@ data class SerializableVideo(
                         vid.internalData,
                         vid.initialized,
                         vid.memo,
+                        // AM (MEDIA3_DRM_CONTRACT) -->
+                        vid.drm?.let { drm -> SerializableVideoDrm(drm.scheme) },
+                        // <-- AM (MEDIA3_DRM_CONTRACT)
                     )
                 },
             )
@@ -255,8 +374,16 @@ data class SerializableVideo(
                         sVid.ffmpegStreamArgs,
                         sVid.ffmpegVideoArgs,
                         sVid.internalData,
-                        sVid.initialized,
+                        sVid.initialized && sVid.drm == null,
                         sVid.memo,
+                        // AM (MEDIA3_DRM_CONTRACT) -->
+                        sVid.drm?.let { drm ->
+                            VideoDrm(
+                                scheme = drm.scheme,
+                                licenseUrl = "",
+                            )
+                        },
+                        // <-- AM (MEDIA3_DRM_CONTRACT)
                     )
                 }
     }

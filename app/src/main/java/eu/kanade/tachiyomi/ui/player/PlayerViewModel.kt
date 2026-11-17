@@ -17,6 +17,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.createSavedStateHandle
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.CreationExtras
+import androidx.media3.ui.AspectRatioFrameLayout
 import animiru.domain.player.interactor.TrackSelect
 import animiru.domain.player.model.ArtType
 import animiru.domain.player.model.CustomKeyCodes
@@ -88,6 +89,8 @@ import eu.kanade.tachiyomi.ui.player.domain.AudioManager
 import eu.kanade.tachiyomi.ui.player.domain.BrightnessManager
 import eu.kanade.tachiyomi.ui.player.loader.EpisodeLoader
 import eu.kanade.tachiyomi.ui.player.loader.HosterLoader
+import eu.kanade.tachiyomi.ui.player.media3.Media3DrmPlayer
+import eu.kanade.tachiyomi.ui.player.media3.Media3PlayerTrack
 import eu.kanade.tachiyomi.ui.player.mpv.ChapterNode
 import eu.kanade.tachiyomi.ui.player.mpv.MPVPlayer
 import eu.kanade.tachiyomi.ui.player.mpv.MpvVideoTrack
@@ -252,6 +255,54 @@ class PlayerViewModel(
     }
 
     val videoOutput = if (decoderPreferences.gpuNext.get()) "gpu-next" else "gpu"
+
+    // AM (MEDIA3_DRM_PLAYER) -->
+    val media3Player = Media3DrmPlayer(
+        context = context,
+        listener = object : Media3DrmPlayer.Listener {
+            override fun onLoading() {
+                updateUiData { it.copy(isLoadingEpisode = true) }
+                updatePlaybackData { it.copy(paused = true) }
+            }
+
+            override fun onReady(durationMs: Long) {
+                updatePlaybackData { it.copy(duration = (durationMs / 1000L).toInt()) }
+                updateUiData { it.copy(isLoadingEpisode = false, previousPauseState = null) }
+            }
+
+            override fun onPlayingChanged(isPlaying: Boolean) {
+                updatePlaybackData { it.copy(paused = !isPlaying) }
+            }
+
+            override fun onFirstFrame() = Unit
+
+            override fun onTracksChanged(
+                audio: List<Media3PlayerTrack>,
+                subtitles: List<Media3PlayerTrack>,
+            ) {
+                updateStateData { it.copy(media3AudioTracks = audio, media3SubtitleTracks = subtitles) }
+            }
+
+            override fun onEnded() {
+                updatePlaybackData { it.copy(paused = true) }
+            }
+
+            override fun onError(errorCode: String) {
+                media3ProgressJob?.cancel()
+                media3ProgressJob = null
+                updateUiData { it.copy(isLoadingEpisode = false) }
+                updatePlaybackData { it.copy(paused = true) }
+                viewModelScope.launch { _eventFlow.emit(Event.Media3Error(errorCode)) }
+            }
+
+            override fun onReleased(positionMs: Long, durationMs: Long) {
+                updateMedia3Progress(positionMs, durationMs)
+            }
+        },
+    )
+
+    private var media3ProgressJob: Job? = null
+    // <-- AM (MEDIA3_DRM_PLAYER)
 
     val player = mpvFactory.create(videoOutput)
     val mpv = player.mpv
@@ -543,7 +594,11 @@ class PlayerViewModel(
     }
 
     fun setPropertyFloat(property: String, value: Float) {
-        mpv.setPropertyFloat(property, value)
+        if (property == "speed" && stateData.value.isMedia3Playback) {
+            setSpeed(value)
+        } else {
+            mpv.setPropertyFloat(property, value)
+        }
     }
 
     fun setPropertyDouble(property: String, value: Double) {
@@ -1147,6 +1202,10 @@ class PlayerViewModel(
 
     private fun startCasting(startPosition: Long = 0) {
         var video = stateData.value.currentVideo ?: return
+        if (video.drm != null) {
+            viewModelScope.launch { _eventFlow.emit(Event.ToastResource(AMMR.strings.am_protected_export_unsupported)) }
+            return
+        }
         val source = stateData.value.currentSource ?: return
         val anime = stateData.value.currentAnime ?: return
         val episode = stateData.value.currentEpisode ?: return
@@ -1700,9 +1759,83 @@ class PlayerViewModel(
         }
 
         qualityIndex = Pair(hosterIndex, videoIndex)
-        setVideo(resolvedVideo)
+        // AM (MEDIA3_DRM_PLAYER) -->
+        if (resolvedVideo.drm != null) {
+            withContext(Dispatchers.Main) { setMedia3Video(resolvedVideo) }
+        } else {
+            releaseMedia3Player()
+            setVideo(resolvedVideo)
+        }
+        // <-- AM (MEDIA3_DRM_PLAYER)
         return true
     }
+
+    // AM (MEDIA3_DRM_PLAYER) -->
+    private fun setMedia3Video(video: Video, restoredPositionSeconds: Long? = null) {
+        stopHttpServer()
+        if (stateData.value.isCasting || castManager.castState.value.isConnected) {
+            castManager.disconnect()
+        }
+        pause()
+        mpvCommand("stop")
+        updateStateData {
+            it.copy(
+                isCasting = false,
+                isStopped = false,
+                isMedia3Playback = true,
+                isPipAvailable = false,
+            )
+        }
+        val startPosition = restoredPositionSeconds ?: stateData.value.currentEpisode?.let { episode ->
+            val preservePos = playerPreferences.preserveWatchingPosition.get()
+            if (episode.seen && !preservePos) 0L else episode.lastSecondSeen / 1000L
+        } ?: 0L
+        media3ProgressJob?.cancel()
+        try {
+            media3Player.load(video, startPosition)
+            media3ProgressJob = viewModelScope.launch {
+                while (stateData.value.isMedia3Playback) {
+                    updateMedia3Progress(media3Player.currentPositionMs(), media3Player.durationMs())
+                    delay(1.seconds)
+                }
+            }
+        } catch (_: IllegalArgumentException) {
+            media3ProgressJob?.cancel()
+            media3ProgressJob = null
+            updateUiData { it.copy(isLoadingEpisode = false) }
+            updatePlaybackData { it.copy(paused = true) }
+            viewModelScope.launch { _eventFlow.emit(Event.Media3Error("INVALID_DRM_CONFIGURATION")) }
+        }
+    }
+
+    private fun updateMedia3Progress(positionMs: Long, durationMs: Long) {
+        if (durationMs <= 0L) return
+        updatePlaybackData { it.copy(duration = (durationMs / 1000L).toInt()) }
+        onSecondReached((positionMs / 1000L).toInt())
+    }
+
+    fun selectMedia3Track(track: PlayerTrack) {
+        (track as? Media3PlayerTrack)?.let(media3Player::selectTrack)
+    }
+
+    fun releaseMedia3Player(clearRoute: Boolean = true) {
+        media3ProgressJob?.cancel()
+        media3ProgressJob = null
+        media3Player.release()
+        if (clearRoute) updateStateData { it.copy(isMedia3Playback = false) }
+    }
+
+    fun suspendMedia3Playback() {
+        if (!stateData.value.isMedia3Playback) return
+        releaseMedia3Player(clearRoute = false)
+    }
+
+    fun resumeMedia3Playback() {
+        if (!stateData.value.isMedia3Playback) return
+        val video = stateData.value.currentVideo?.takeIf { it.drm != null } ?: return
+        setMedia3Video(video, playbackData.value.position.toLong())
+    }
+    // <-- AM (MEDIA3_DRM_PLAYER)
 
     private fun setVideo(video: Video?) {
         if (player.isExiting) return
@@ -2596,15 +2729,35 @@ class PlayerViewModel(
         updateStateData { it.copy(isPipAvailable = value) }
     }
 
-    fun pauseUnpause() = mpvCommand("cycle", "pause")
+    fun pauseUnpause() {
+        // AM (MEDIA3_DRM_PLAYER) -->
+        if (stateData.value.isMedia3Playback) {
+            if (playbackData.value.paused) media3Player.play() else media3Player.pause()
+            return
+        }
+        // <-- AM (MEDIA3_DRM_PLAYER)
+        mpvCommand("cycle", "pause")
+    }
     fun pause() {
-        setPropertyBoolean("pause", true)
+        // AM (MEDIA3_DRM_PLAYER) -->
+        if (stateData.value.isMedia3Playback) {
+            media3Player.pause()
+        } else {
+            setPropertyBoolean("pause", true)
+        }
+        // <-- AM (MEDIA3_DRM_PLAYER)
 
         // PiP needs to know the state immediately, so we update it here
         updatePlaybackData { it.copy(paused = true) }
     }
     fun unpause() {
-        setPropertyBoolean("pause", false)
+        // AM (MEDIA3_DRM_PLAYER) -->
+        if (stateData.value.isMedia3Playback) {
+            media3Player.play()
+        } else {
+            setPropertyBoolean("pause", false)
+        }
+        // <-- AM (MEDIA3_DRM_PLAYER)
         updatePlaybackData { it.copy(paused = false) }
     }
 
@@ -2827,6 +2980,8 @@ class PlayerViewModel(
         mpvVolume = 0f
     }
 
+    fun getSystemBrightness(): Float = brightnessManager.getCurrentBrightness()
+
     fun changeVolumeBy(change: Int) {
         val mpvVolume = mpv.getPropertyInt("volume")
         if ((stateData.value.volumeBoostCap ?: audioPreferences.volumeBoostCap.get()) > 0 &&
@@ -2887,14 +3042,28 @@ class PlayerViewModel(
             }
         }
 
-        setPropertyDouble("panscan", pan)
-        setPropertyDouble("video-aspect-override", ratio)
+        if (stateData.value.isMedia3Playback) {
+            val resizeMode = when (aspect) {
+                VideoAspect.Crop -> AspectRatioFrameLayout.RESIZE_MODE_ZOOM
+                VideoAspect.Fit -> AspectRatioFrameLayout.RESIZE_MODE_FIT
+                VideoAspect.Stretch -> AspectRatioFrameLayout.RESIZE_MODE_FILL
+            }
+            media3Player.setResizeMode(resizeMode)
+        } else {
+            setPropertyDouble("panscan", pan)
+            setPropertyDouble("video-aspect-override", ratio)
+        }
         playerPreferences.aspectState.set(aspect)
         updateUiData { it.copy(playerUpdate = PlayerUpdates.AspectRatio(aspect)) }
     }
 
     private fun setSpeed(value: Float) {
-        setPropertyFloat("speed", value)
+        if (stateData.value.isMedia3Playback) {
+            media3Player.setPlaybackSpeed(value)
+            updateUiData { it.copy(playerSpeedPref = value) }
+        } else {
+            setPropertyFloat("speed", value)
+        }
         playerPreferences.playerSpeed.set(value)
     }
 
@@ -3214,12 +3383,21 @@ class PlayerViewModel(
     }
 
     fun seekBy(offset: Int) {
+        if (stateData.value.isMedia3Playback) {
+            seekTo((playbackData.value.position + offset).coerceIn(0, playbackData.value.duration))
+            return
+        }
         mpvCommand("seek", offset.toString(), if (smoothSeeking) "relative+exact" else "relative")
     }
 
     fun seekTo(position: Int) {
         if (position !in 0..playbackData.value.duration) return
-        mpvCommand("seek", position.toString(), if (smoothSeeking) "absolute" else "absolute+keyframes")
+        if (stateData.value.isMedia3Playback) {
+            media3Player.seekTo(position)
+            updatePlaybackData { it.copy(position = position) }
+        } else {
+            mpvCommand("seek", position.toString(), if (smoothSeeking) "absolute" else "absolute+keyframes")
+        }
 
         viewModelScope.launch {
             if (!playbackData.value.paused) {
@@ -3940,6 +4118,9 @@ class PlayerViewModel(
         val isCasting: Boolean = false,
         val isLoadingCasting: Boolean = false,
         val isErrorCasting: Boolean = false,
+        // AM (MEDIA3_DRM_PLAYER) -->
+        val isMedia3Playback: Boolean = false,
+        // <-- AM (MEDIA3_DRM_PLAYER)
         val isStopped: Boolean = false,
         val hasTrackers: Boolean = false,
         val incognitoMode: Boolean = false,
@@ -3967,6 +4148,8 @@ class PlayerViewModel(
         val audioTracks: List<TrackNode> = emptyList(),
         val externalSubtitleTracks: List<MpvVideoTrack.External> = emptyList(),
         val externalAudioTracks: List<MpvVideoTrack.External> = emptyList(),
+        val media3SubtitleTracks: List<Media3PlayerTrack> = emptyList(),
+        val media3AudioTracks: List<Media3PlayerTrack> = emptyList(),
         val hosterList: List<Hoster> = emptyList(),
         val hosterState: List<HosterState> = emptyList(),
         val isPipAvailable: Boolean = false,
@@ -4065,6 +4248,11 @@ class PlayerViewModel(
         data class EpisodeTitle(val name: String) : Event
         data object Finish : Event
         data class InitialEpisodeError(val error: Throwable) : Event
+
+        // AM (MEDIA3_DRM_PLAYER) -->
+        data class Media3Error(val errorCode: String) : Event
+
+        // <-- AM (MEDIA3_DRM_PLAYER)
         data class SavedImage(val result: SaveImageResult) : Event
         data class SetArtResult(val result: SetAsArt, val artType: ArtType) : Event
         data class SetKeyboard(val show: Boolean) : Event

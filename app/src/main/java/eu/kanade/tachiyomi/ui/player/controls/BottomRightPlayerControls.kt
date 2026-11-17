@@ -36,6 +36,7 @@ fun BottomRightPlayerControls(
     castLoading: Boolean,
     castError: Boolean,
     isPipAvailable: Boolean,
+    showAspectRatio: Boolean = true,
     onAspectClick: () -> Unit,
     onPipClick: () -> Unit,
     onScrenshotClick: () -> Unit,
@@ -64,10 +65,12 @@ fun BottomRightPlayerControls(
             )
         }
 
-        ControlsButton(
-            MaterialSymbols.Rounded.AspectRatio,
-            onClick = onAspectClick,
-            verticalSpacing = MaterialTheme.padding.small,
-        )
+        if (showAspectRatio) {
+            ControlsButton(
+                MaterialSymbols.Rounded.AspectRatio,
+                onClick = onAspectClick,
+                verticalSpacing = MaterialTheme.padding.small,
+            )
+        }
     }
 }
