@@ -26,15 +26,17 @@ import androidx.compose.ui.platform.LocalViewConfiguration
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.graphics.toColorInt
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.media3.ui.CaptionStyleCompat
 import androidx.media3.ui.PlayerView
+import androidx.media3.ui.SubtitleView
 import animiru.domain.player.model.AudioChannels
 import animiru.domain.player.model.DebandSettings
 import animiru.domain.player.model.Debanding
 import animiru.domain.player.model.Decoder.Companion.getDecoderFromValue
 import animiru.domain.player.model.SubtitleJustification
 import animiru.domain.player.model.SubtitlesBorderStyle
-import animiru.domain.player.model.VideoFilters
 import animiru.domain.player.service.SubtitleAssOverride
+import animiru.domain.player.model.VideoFilters
 import cafe.adriel.voyager.core.annotation.InternalVoyagerApi
 import eu.kanade.presentation.theme.playerRippleConfiguration
 import eu.kanade.tachiyomi.ui.player.PlayerViewModel.PlayerEvent
@@ -112,6 +114,17 @@ fun PlayerScreen(
     val relativeTime by uiPreferences.relativeTime.collectAsState()
     val dateFormat by uiPreferences.dateFormat.collectAsState()
     val isLandscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
+
+    // AM (MEDIA3_DRM_PLAYER) -->
+    // Subtitle Styling Preferences for Media3
+    val subTextColor by subtitlePreferences.textColorSubtitles.collectAsState()
+    val subBgColor by subtitlePreferences.backgroundColorSubtitles.collectAsState()
+    val subBorderColor by subtitlePreferences.borderColorSubtitles.collectAsState()
+    val subBorderStyle by subtitlePreferences.borderStyleSubtitles.collectAsState()
+    val subFontScale by subtitlePreferences.subtitleFontScale.collectAsState()
+    val subOverrideAss by subtitlePreferences.overrideSubsASS.collectAsState()
+    val subPos by subtitlePreferences.subtitlePos.collectAsState()
+    // <-- AM (MEDIA3_DRM_PLAYER)
 
     var hasNavigatedBack by remember { mutableStateOf(false) }
 
@@ -260,10 +273,35 @@ fun PlayerScreen(
                                 },
                             ),
                         )
+                        subtitleView?.apply {
+                            setApplyEmbeddedStyles(true)
+                            setBottomPaddingFraction(0.08f)
+                        }
                         viewModel.media3Player.attach(this)
                     }
                 },
-                update = { view -> viewModel.media3Player.attach(view) },
+                update = { view ->
+                    viewModel.media3Player.attach(view)
+                    view.subtitleView?.apply {
+                        val edgeType = when (subBorderStyle) {
+                            SubtitlesBorderStyle.OutlineAndShadow -> CaptionStyleCompat.EDGE_TYPE_OUTLINE
+                            else -> CaptionStyleCompat.EDGE_TYPE_NONE
+                        }
+                        val style = CaptionStyleCompat(
+                            subTextColor,
+                            subBgColor,
+                            android.graphics.Color.TRANSPARENT,
+                            edgeType,
+                            subBorderColor,
+                            null,
+                        )
+                        setStyle(style)
+                        setFractionalTextSize(SubtitleView.DEFAULT_TEXT_SIZE_FRACTION * subFontScale)
+                        setApplyEmbeddedStyles(subOverrideAss == SubtitleAssOverride.No)
+                        val bottomPadding = ((100 - subPos).coerceIn(0, 100) / 100f) * 0.5f + 0.08f
+                        setBottomPaddingFraction(bottomPadding)
+                    }
+                },
                 onRelease = viewModel.media3Player::detach,
             )
             val zoomEnabled by gesturePreferences.gestureZoom.collectAsState()
@@ -308,8 +346,8 @@ fun PlayerScreen(
                     remaining = null,
                     playbackSpeed = uiData.playerSpeedPref,
                     capabilities = PlayerControlCapabilities.Media3Drm.copy(
-                        subtitles = stateData.media3SubtitleTracks.isNotEmpty(),
-                        audioTracks = stateData.media3AudioTracks.isNotEmpty(),
+                        subtitles = true,
+                        audioTracks = true,
                     ),
                     modifier = Modifier.fillMaxSize(),
                 )
