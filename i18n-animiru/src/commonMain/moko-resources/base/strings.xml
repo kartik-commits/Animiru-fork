@@ -1,10 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- AM (MEDIA3_PROTOTYPE) -->
-    <string name="pref_media3_test">Media3 Widevine test</string>
-    <string name="pref_media3_test_summary">Debug-only public test stream. No account required.</string>
+    <!-- AM (MEDIA3) -->
     <string name="media3_drm_playback_failed">Protected playback failed (%1$s)</string>
-    <!-- AM (MEDIA3_PROTOTYPE) end -->
+    <!-- AM (MEDIA3) end -->
     <string name="action_filter_fillermarked">Fillermarked</string>
     <string name="pref_show_downloaded_episode_file_size">Show downloaded episode file size</string>
     <string name="skipped_reason_not_caught_up_anime">Skipped because there are unseen episodes</string>
