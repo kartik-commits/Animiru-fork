@@ -1833,6 +1833,7 @@ class PlayerViewModel(
         }
         pause()
         mpvCommand("stop")
+        onResetTransform()
         val externalDubs = video.audioTracks
         val currentAudioDubs = if (externalDubs.isNotEmpty()) {
             externalDubs.mapIndexed { index, track ->
@@ -3143,6 +3144,26 @@ class PlayerViewModel(
     private var zoom = 1f
     private var offset = Offset.Zero
     fun onTransformChange(deltaZoom: Float, deltaPan: Offset) {
+        // AM (MEDIA3_DRM_PLAYER) -->
+        if (stateData.value.isMedia3Playback) {
+            zoom = (zoom * deltaZoom).coerceIn(0.5f, 4f)
+            offset += deltaPan
+            val isTransformed = zoom.times(100f).roundToInt() != 100 || abs(offset.x) > 1f || abs(offset.y) > 1f
+            updateStateData {
+                it.copy(
+                    media3Zoom = zoom,
+                    media3PanX = offset.x,
+                    media3PanY = offset.y,
+                )
+            }
+            updateUiData { it.copy(showResetTransform = isTransformed) }
+            if (deltaZoom != 1f) {
+                updateUiData { it.copy(playerUpdate = PlayerUpdates.Transform(zoom.times(100f).roundToInt())) }
+            }
+            return
+        }
+        // <-- AM (MEDIA3_DRM_PLAYER)
+
         zoom *= deltaZoom
         offset += deltaPan
 
@@ -3160,6 +3181,21 @@ class PlayerViewModel(
     }
 
     fun onResetTransform() {
+        zoom = 1f
+        offset = Offset.Zero
+        // AM (MEDIA3_DRM_PLAYER) -->
+        if (stateData.value.isMedia3Playback) {
+            updateStateData {
+                it.copy(
+                    media3Zoom = 1f,
+                    media3PanX = 0f,
+                    media3PanY = 0f,
+                )
+            }
+            updateUiData { it.copy(showResetTransform = false) }
+            return
+        }
+        // <-- AM (MEDIA3_DRM_PLAYER)
         mpv.setPropertyFloat("video-zoom", 0f)
         mpv.setPropertyFloat("video-pan-x", 0f)
         mpv.setPropertyFloat("video-pan-y", 0f)
@@ -4452,6 +4488,11 @@ class PlayerViewModel(
         val externalAudioTracks: List<MpvVideoTrack.External> = emptyList(),
         val media3SubtitleTracks: List<Media3PlayerTrack> = emptyList(),
         val media3AudioTracks: List<Media3PlayerTrack> = emptyList(),
+        // AM (MEDIA3_DRM_PLAYER) -->
+        val media3Zoom: Float = 1f,
+        val media3PanX: Float = 0f,
+        val media3PanY: Float = 0f,
+        // <-- AM (MEDIA3_DRM_PLAYER)
         val hosterList: List<Hoster> = emptyList(),
         val hosterState: List<HosterState> = emptyList(),
         val isPipAvailable: Boolean = false,

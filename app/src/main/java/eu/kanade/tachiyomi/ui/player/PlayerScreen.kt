@@ -20,6 +20,7 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalViewConfiguration
@@ -248,7 +249,15 @@ fun PlayerScreen(
             val currentGesturesEnabled by rememberUpdatedState(gestureVolumeBrightness)
             val touchSlop = LocalViewConfiguration.current.touchSlop
             AndroidView(
-                modifier = Modifier.fillMaxSize(),
+                modifier = Modifier
+                    .fillMaxSize()
+                    .graphicsLayer {
+                        scaleX = stateData.media3Zoom
+                        scaleY = stateData.media3Zoom
+                        translationX = stateData.media3PanX
+                        translationY = stateData.media3PanY
+                        clip = true
+                    },
                 factory = { context ->
                     PlayerView(context).apply {
                         useController = false
