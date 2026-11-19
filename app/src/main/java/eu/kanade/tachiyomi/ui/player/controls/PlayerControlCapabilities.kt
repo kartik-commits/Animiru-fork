@@ -17,7 +17,7 @@ data class PlayerControlCapabilities(
             audioTracks = true,
             more = false,
             cast = false,
-            pictureInPicture = false,
+            pictureInPicture = true,
             screenshots = false,
         )
     }

@@ -121,7 +121,7 @@ class PlayerActivity : BaseActivity() {
         get() = viewModel.stateData.value.isMedia3Playback
 
     private val canEnterPictureInPicture: Boolean
-        get() = isPipSupportedAndEnabled && !isProtectedPlayback
+        get() = isPipSupportedAndEnabled
 
     private var pipReceiver: BroadcastReceiver? = null
 
