@@ -23,6 +23,9 @@
 -keep class eu.kanade.tachiyomi.animesource.model.TileInfo { public protected *; }
 -keep class eu.kanade.tachiyomi.animesource.model.TimeStamp { public protected *; }
 -keep class eu.kanade.tachiyomi.animesource.model.Track { public protected *; }
+-keep class eu.kanade.tachiyomi.animesource.model.VideoDrm { *; }
+-keep class eu.kanade.tachiyomi.animesource.model.VideoDrmScheme { *; }
+-keep enum eu.kanade.tachiyomi.animesource.model.VideoDrmScheme { *; }
 -keep class fi.iki.elonen.** { *; }
 # <-- AM
 -keep class eu.kanade.tachiyomi.animesource.model.SAnime { public protected *; }

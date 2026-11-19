@@ -27,6 +27,13 @@
 -keep,allowoptimization class eu.kanade.tachiyomi.torrentutils.model.TorrentFile { public protected *; }
 -keep,allowoptimization class eu.kanade.tachiyomi.torrentutils.model.TorrentInfo { public protected *; }
 -keep,allowoptimization class eu.kanade.tachiyomi.torrentutils.model.DeadTorrentException { public protected *; }
+# AM (MEDIA3_DRM_PLAYER) -->
+-keep class androidx.media3.** { *; }
+-keep class eu.kanade.tachiyomi.ui.player.media3.** { *; }
+-keep class eu.kanade.tachiyomi.animesource.model.VideoDrm { *; }
+-keep class eu.kanade.tachiyomi.animesource.model.VideoDrmScheme { *; }
+-keep enum eu.kanade.tachiyomi.animesource.model.VideoDrmScheme { *; }
+# <-- AM (MEDIA3_DRM_PLAYER)
 # <-- AM
 
 -keepclassmembers class * implements java.io.Serializable {
