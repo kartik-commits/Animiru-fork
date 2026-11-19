@@ -280,7 +280,26 @@ class PlayerViewModel(
                 audio: List<Media3PlayerTrack>,
                 subtitles: List<Media3PlayerTrack>,
             ) {
-                updateStateData { it.copy(media3AudioTracks = audio, media3SubtitleTracks = subtitles) }
+                val currentVideo = stateData.value.currentVideo
+                val externalDubs = currentVideo?.audioTracks.orEmpty()
+                val mergedAudio = if (externalDubs.isNotEmpty()) {
+                    externalDubs.mapIndexed { index, track ->
+                        val isSelected = currentVideo?.videoTitle?.contains(track.lang) == true ||
+                            (index == 0 && !externalDubs.any { currentVideo?.videoTitle?.contains(it.lang) == true })
+                        Media3PlayerTrack(
+                            trackType = androidx.media3.common.C.TRACK_TYPE_AUDIO,
+                            groupIndex = -1,
+                            trackIndex = index,
+                            title = track.lang,
+                            language = track.lang,
+                            selection = if (isSelected) 0 else -1,
+                            url = track.url,
+                        )
+                    }
+                } else {
+                    audio
+                }
+                updateStateData { it.copy(media3AudioTracks = mergedAudio, media3SubtitleTracks = subtitles) }
             }
 
             override fun onEnded() {
@@ -302,6 +321,7 @@ class PlayerViewModel(
     )
 
     private var media3ProgressJob: Job? = null
+    private var media3DubSwitchJob: Job? = null
     // <-- AM (MEDIA3_DRM_PLAYER)
 
     val player = mpvFactory.create(videoOutput)
@@ -1700,6 +1720,36 @@ class PlayerViewModel(
             )
         }
 
+        // AM (MEDIA3_DRM_PLAYER) -->
+        val currentVid = stateData.value.currentVideo
+        val isSameMedia3Stream = stateData.value.isMedia3Playback &&
+            currentVid?.drm != null &&
+            selectedHosterState.name == eu.kanade.tachiyomi.animesource.model.Hoster.NO_HOSTER_LIST
+
+        if (isSameMedia3Stream && currentVid != null) {
+            val dubSuffix = if (currentVid.videoTitle.contains(" [")) {
+                " [" + currentVid.videoTitle.substringAfterLast(" [")
+            } else ""
+            val newTitle = video.videoTitle.replace(Regex("""\[.*?\]"""), "").trim() + dubSuffix
+            val resolvedVideo = currentVid.copy(
+                resolution = video.resolution,
+                videoTitle = newTitle,
+            )
+            updateHosterStateAt(
+                index = hosterIndex,
+                state = selectedHosterState.getChangedAt(videoIndex, resolvedVideo, Video.State.READY),
+            )
+            updateStateData { it.copy(currentVideo = resolvedVideo) }
+            qualityIndex = Pair(hosterIndex, videoIndex)
+            withContext(Dispatchers.Main) {
+                media3Player.setVideoResolution(resolvedVideo.resolution)
+                updateUiData { it.copy(selectedHosterVideoIndex = Pair(hosterIndex, videoIndex)) }
+                dismissSheet()
+            }
+            return true
+        }
+        // <-- AM (MEDIA3_DRM_PLAYER)
+
         // Pause until everything has loaded
         pause()
 
@@ -1761,7 +1811,12 @@ class PlayerViewModel(
         qualityIndex = Pair(hosterIndex, videoIndex)
         // AM (MEDIA3_DRM_PLAYER) -->
         if (resolvedVideo.drm != null) {
-            withContext(Dispatchers.Main) { setMedia3Video(resolvedVideo) }
+            val currentPos = if (stateData.value.isMedia3Playback) {
+                (media3Player.currentPositionMs() / 1000L).coerceAtLeast(0L)
+            } else {
+                null
+            }
+            withContext(Dispatchers.Main) { setMedia3Video(resolvedVideo, currentPos) }
         } else {
             releaseMedia3Player()
             setVideo(resolvedVideo)
@@ -1778,12 +1833,53 @@ class PlayerViewModel(
         }
         pause()
         mpvCommand("stop")
+        val externalDubs = video.audioTracks
+        val currentAudioDubs = if (externalDubs.isNotEmpty()) {
+            externalDubs.mapIndexed { index, track ->
+                val isSelected = video.videoTitle.contains(track.lang) ||
+                    (index == 0 && !externalDubs.any { video.videoTitle.contains(it.lang) })
+                Media3PlayerTrack(
+                    trackType = androidx.media3.common.C.TRACK_TYPE_AUDIO,
+                    groupIndex = -1,
+                    trackIndex = index,
+                    title = track.lang,
+                    language = track.lang,
+                    selection = if (isSelected) 0 else -1,
+                    url = track.url,
+                )
+            }
+        } else {
+            emptyList()
+        }
+        val rawSubs = video.subtitleTracks.filter { it.lang != "none" && it.url.isNotBlank() }.mapIndexed { index, track ->
+            val isDefault = track.lang.startsWith("en", ignoreCase = true)
+            Media3PlayerTrack(
+                trackType = androidx.media3.common.C.TRACK_TYPE_TEXT,
+                groupIndex = 0,
+                trackIndex = index,
+                title = eu.kanade.tachiyomi.ui.player.media3.getLanguageDisplayName(track.lang),
+                language = track.lang,
+                selection = if (isDefault) 0 else -1,
+            )
+        }
+        val hasSelectedSub = rawSubs.any { it.selection > -1 }
+        val noneTrack = Media3PlayerTrack(
+            trackType = androidx.media3.common.C.TRACK_TYPE_TEXT,
+            groupIndex = -1,
+            trackIndex = -1,
+            title = "None",
+            language = "none",
+            selection = if (!hasSelectedSub) 0 else -1,
+        )
+        val initialSubs = listOf(noneTrack) + rawSubs
         updateStateData {
             it.copy(
                 isCasting = false,
                 isStopped = false,
                 isMedia3Playback = true,
-                isPipAvailable = false,
+                isPipAvailable = true,
+                media3AudioTracks = if (currentAudioDubs.isNotEmpty()) currentAudioDubs else it.media3AudioTracks,
+                media3SubtitleTracks = if (initialSubs.isNotEmpty()) initialSubs else it.media3SubtitleTracks,
             )
         }
         val startPosition = restoredPositionSeconds ?: stateData.value.currentEpisode?.let { episode ->
@@ -1808,17 +1904,133 @@ class PlayerViewModel(
         }
     }
 
+    private var media3AniSkipAttemptedEpisodeId: Long? = null
+
     private fun updateMedia3Progress(positionMs: Long, durationMs: Long) {
         if (durationMs <= 0L) return
-        updatePlaybackData { it.copy(duration = (durationMs / 1000L).toInt()) }
-        onSecondReached((positionMs / 1000L).toInt())
+        val durSec = (durationMs / 1000L).toInt()
+        val posSec = (positionMs / 1000L).toInt()
+        updatePlaybackData { it.copy(duration = durSec) }
+        val currentEpId = episodeId
+        if (media3AniSkipAttemptedEpisodeId != currentEpId && durSec > 0) {
+            media3AniSkipAttemptedEpisodeId = currentEpId
+            loadAniSkip(0, durSec)
+        }
+        onSecondReached(posSec)
+    }
+
+    private fun media3OnChapterChanged(chapter: Segment?) {
+        updateStateData { it.copy(currentChapter = chapter) }
+        if (chapter == null) {
+            updateUiData { it.copy(skipIntroText = null) }
+            updatePlaybackData { it.copy(netflixTimeout = null) }
+            return
+        }
+
+        if (!introSkipEnabled) return
+        val chapterType = chapter.getChapterType()
+
+        if (chapterType == ChapterType.Other) {
+            updateUiData { it.copy(skipIntroText = null) }
+            updatePlaybackData { it.copy(netflixTimeout = null) }
+        } else {
+            val cleanTitle = chapter.name.substringBeforeLast(ChapterUtils.ANIYOMI_CHAPTER_IDENTIFIER)
+            if (netflixStyle) {
+                viewModelScope.launch {
+                    _eventFlow.emit(
+                        Event.ToastString(
+                            "Skip Intro: ${context.stringResource(
+                                AYMR.strings.player_aniskip_dontskip_toast,
+                                cleanTitle,
+                                defaultWaitingTime,
+                            )}",
+                        ),
+                    )
+                }
+                updateUiData { it.copy(skipIntroText = context.stringResource(AYMR.strings.player_aniskip_dontskip)) }
+                updatePlaybackData { it.copy(netflixTimeout = defaultWaitingTime) }
+            } else if (autoSkip) {
+                val nextChapterStart = stateData.value.chapters.filter { it.start > chapter.start }
+                    .minByOrNull { it.start }?.start?.toInt()
+                    ?: playbackData.value.duration
+                media3Player.seekTo(nextChapterStart)
+                showSeekText(true, context.stringResource(AYMR.strings.player_intro_skipped, cleanTitle))
+            } else {
+                updateSkipIntroButton(chapterType)
+            }
+        }
     }
 
     fun selectMedia3Track(track: PlayerTrack) {
-        (track as? Media3PlayerTrack)?.let(media3Player::selectTrack)
+        val media3Track = track as? Media3PlayerTrack ?: return
+        if (media3Track.trackType == androidx.media3.common.C.TRACK_TYPE_AUDIO && media3Track.url != null) {
+            switchMedia3AudioDub(media3Track.url, media3Track.title)
+        } else {
+            media3Player.selectTrack(media3Track)
+        }
+    }
+
+    private fun switchMedia3AudioDub(versionGuid: String, dubTitle: String) {
+        val currentVideo = stateData.value.currentVideo ?: return
+        val currentPos = (media3Player.currentPositionMs() / 1000L).coerceAtLeast(0L)
+        val source = stateData.value.currentSource ?: return
+        val baseEpUrl = stateData.value.currentEpisode?.url ?: currentVideo.videoUrl
+
+        val newUrl = try {
+            val regex = Regex(""""versionGuid"\s*:\s*("[^"]*"|null)""")
+            if (baseEpUrl.contains("versionGuid")) {
+                baseEpUrl.replace(regex, """"versionGuid":"$versionGuid"""")
+            } else {
+                baseEpUrl
+            }
+        } catch (_: Exception) {
+            baseEpUrl
+        }
+
+        val cleanTitle = currentVideo.videoTitle.replace(Regex("""\[.*?\]"""), "").trim().ifBlank { "Auto (Adaptive)" }
+        val newVideo = currentVideo.copy(
+            videoTitle = "$cleanTitle [$dubTitle]",
+            videoUrl = newUrl,
+            initialized = false,
+            drm = null,
+        )
+
+        media3DubSwitchJob?.cancel()
+        media3DubSwitchJob = viewModelScope.launch(Dispatchers.IO) {
+            delay(250)
+            updateUiData { it.copy(isLoadingEpisode = true) }
+            try {
+                val resolved = hosterLoader.getResolvedVideo(source, newVideo)
+                if (resolved != null && resolved.drm != null && resolved.initialized) {
+                    withContext(Dispatchers.Main) {
+                        updateStateData { it.copy(currentVideo = resolved) }
+                        setMedia3Video(resolved, currentPos)
+                        dismissSheet()
+                    }
+                } else {
+                    withContext(Dispatchers.Main) {
+                        updateUiData { it.copy(isLoadingEpisode = false) }
+                        _eventFlow.emit(Event.ToastString("This audio dub is unavailable or region-locked"))
+                    }
+                }
+            } catch (e: Exception) {
+                if (e is CancellationException) throw e
+                withContext(Dispatchers.Main) {
+                    updateUiData { it.copy(isLoadingEpisode = false) }
+                    val msg = if (e.message?.contains("region-locked", ignoreCase = true) == true) {
+                        "This audio dub is unavailable or region-locked"
+                    } else {
+                        "Failed to switch audio: ${e.message ?: "Unavailable"}"
+                    }
+                    _eventFlow.emit(Event.ToastString(msg))
+                }
+            }
+        }
     }
 
     fun releaseMedia3Player(clearRoute: Boolean = true) {
+        media3DubSwitchJob?.cancel()
+        media3DubSwitchJob = null
         media3ProgressJob?.cancel()
         media3ProgressJob = null
         media3Player.release()
@@ -2085,6 +2297,25 @@ class PlayerViewModel(
             return
         }
 
+        if (stateData.value.isMedia3Playback && stateData.value.currentVideo?.drm != null) {
+            media3Player.setVideoResolution(video.resolution)
+            qualityIndex = Pair(hosterIndex, videoIndex)
+            updateUiData { it.copy(selectedHosterVideoIndex = Pair(hosterIndex, videoIndex)) }
+            val updatedVideo = stateData.value.currentVideo?.copy(
+                resolution = video.resolution,
+                videoTitle = video.videoTitle,
+            )
+            if (updatedVideo != null) {
+                updateStateData { it.copy(currentVideo = updatedVideo) }
+            }
+            if (uiData.value.sheetShown == Sheets.QualityTracks ||
+                castUiData.value.sheetShown == CastSheet.Quality
+            ) {
+                dismissSheet()
+            }
+            return
+        }
+
         viewModelScope.launch(Dispatchers.IO) {
             val success = loadVideo(video, hosterIndex, videoIndex)
             if (success) {
@@ -2162,7 +2393,15 @@ class PlayerViewModel(
             if (introSkipEnabled && aniSkipEnabled && !(disableAniSkipOnChapters && chapterCount > 0)) {
                 aniSkipResponse(duration)?.let { stamps ->
                     updateStateData { it.copy(aniskipChapters = stamps) }
-                    if (!stateData.value.isCasting) {
+                    if (stateData.value.isMedia3Playback) {
+                        val dur = duration ?: playbackData.value.duration
+                        val merged = ChapterUtils.mergeChapters(
+                            currentChapters = emptyList(),
+                            stamps = stamps,
+                            duration = dur,
+                        ).map { it.toSegment() }
+                        updateStateData { it.copy(chapters = merged) }
+                    } else if (!stateData.value.isCasting) {
                         addTimeStamps(stamps)
                     }
                 } ?: run {
@@ -3407,6 +3646,13 @@ class PlayerViewModel(
     }
 
     fun selectChapter(index: Int) {
+        if (stateData.value.isMedia3Playback) {
+            val chapter = stateData.value.chapters.getOrNull(index) ?: return
+            media3Player.seekTo(chapter.start.toInt())
+            dismissSheet()
+            unpause()
+            return
+        }
         setPropertyInt("chapter", index)
         dismissSheet()
         unpause()
@@ -3487,6 +3733,11 @@ class PlayerViewModel(
             val chapter = castUiData.value.chapters.filter { it.start <= position }.maxByOrNull { it.start }
             if (chapter != castUiData.value.currentChapter) {
                 castOnChapterChanged(chapter)
+            }
+        } else if (stateData.value.isMedia3Playback) {
+            val chapter = stateData.value.chapters.filter { it.start <= position }.maxByOrNull { it.start }
+            if (chapter != stateData.value.currentChapter) {
+                media3OnChapterChanged(chapter)
             }
         }
 
@@ -4017,6 +4268,26 @@ class PlayerViewModel(
     }
 
     fun onSkipIntro() {
+        if (stateData.value.isMedia3Playback) {
+            val chapter = stateData.value.currentChapter ?: return
+            val nextChapterStart = stateData.value.chapters.filter { it.start > chapter.start }
+                .minByOrNull { it.start }?.start?.toInt()
+                ?: playbackData.value.duration
+
+            if ((playbackData.value.netflixTimeout ?: 0) > 0 && netflixStyle) {
+                updatePlaybackData { it.copy(netflixTimeout = null) }
+                updateSkipIntroButton(chapter.getChapterType())
+                return
+            }
+
+            updatePlaybackData { it.copy(netflixTimeout = null) }
+            val cleanTitle = chapter.name.substringBeforeLast(ChapterUtils.ANIYOMI_CHAPTER_IDENTIFIER)
+            media3Player.seekTo(nextChapterStart)
+            showSeekText(true, context.stringResource(AYMR.strings.player_intro_skipped, cleanTitle))
+            updateUiData { it.copy(skipIntroText = null) }
+            return
+        }
+
         val chapterIndex = mpv.getPropertyInt("chapter") ?: return
         val chapterList = mpv.getPropertyNode("chapter-list")?.toObject<List<ChapterNode>>(json)
             ?: emptyList()
@@ -4071,25 +4342,38 @@ class PlayerViewModel(
      */
     suspend fun aniSkipResponse(playerDuration: Int?): List<TimeStamp>? {
         val animeId = stateData.value.currentAnime?.id ?: return null
-        var malId: Long?
         val episodeNumber = stateData.value.currentEpisode?.episodeNumber?.toInt() ?: return null
-        if (getTracks.await(animeId).isEmpty()) {
-            logcat(LogPriority.DEBUG) { "AniSkip: No tracks found for anime $animeId" }
-            return null
+        val duration = playerDuration ?: return null
+
+        val tracks = getTracks.await(animeId)
+        if (tracks.isNotEmpty()) {
+            for (track in tracks) {
+                val tracker = trackerManager.get(track.trackerId)
+                val malId = when (tracker) {
+                    is MyAnimeList -> track.remoteId
+                    is Anilist -> aniSkipApi.getMalIdFromAL(track.remoteId)
+                    else -> null
+                }
+                if (malId != null && malId > 0) {
+                    val result = aniSkipApi.getResult(malId.toInt(), episodeNumber, duration.toLong())
+                    if (result != null) return result
+                }
+            }
         }
 
-        getTracks.await(animeId).forEach { track ->
-            val tracker = trackerManager.get(track.trackerId)
-            malId = when (tracker) {
-                is MyAnimeList -> track.remoteId
-                is Anilist -> aniSkipApi.getMalIdFromAL(track.remoteId)
-                else -> null
-            }
-            val duration = playerDuration ?: return null
-            return malId?.let {
-                aniSkipApi.getResult(it.toInt(), episodeNumber, duration.toLong())
+        // Automatic fallback: resolve MAL ID via AniList GraphQL using anime title
+        val title = stateData.value.currentAnime?.title
+        if (!title.isNullOrBlank()) {
+            logcat(LogPriority.DEBUG) { "AniSkip: Falling back to title search for '$title'" }
+            val malId = aniSkipApi.getMalIdFromTitle(title)
+            if (malId != null && malId > 0) {
+                logcat(LogPriority.DEBUG) { "AniSkip: Resolved MAL ID $malId for '$title'" }
+                val result = aniSkipApi.getResult(malId.toInt(), episodeNumber, duration.toLong())
+                if (result != null) return result
             }
         }
+
+        logcat(LogPriority.DEBUG) { "AniSkip: No skip times found for anime $animeId (title: $title, ep: $episodeNumber)" }
         return null
     }
 

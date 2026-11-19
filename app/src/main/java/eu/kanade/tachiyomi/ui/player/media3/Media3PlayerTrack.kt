@@ -9,6 +9,7 @@ data class Media3PlayerTrack(
     override val title: String,
     override val language: String,
     override val selection: Int,
+    val url: String? = null,
 ) : PlayerTrack {
     override val displayId: Int = trackIndex + 1
     override val loading: Boolean = false

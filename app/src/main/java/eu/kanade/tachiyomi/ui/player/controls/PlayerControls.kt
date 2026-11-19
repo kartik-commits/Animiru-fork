@@ -293,7 +293,7 @@ fun PlayerControls(
             }
 
             AnimatedVisibility(
-                visible = uiData.controlsShown && !uiData.isControlsLocked,
+                visible = (uiData.controlsShown || uiData.skipIntroText != null) && !uiData.isControlsLocked,
                 enter = if (!uiData.reduceMotion) {
                     slideInVertically(playerControlsEnterAnimationSpec()) { it } +
                         fadeIn(playerControlsEnterAnimationSpec())

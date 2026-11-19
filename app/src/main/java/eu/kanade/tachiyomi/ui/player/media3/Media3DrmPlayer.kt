@@ -87,17 +87,46 @@ class Media3DrmPlayer(
 
                 override fun onTracksChanged(tracks: Tracks) {
                     if (player !== engine) return
+                    val rawSubs = tracks.toPlayerTracks(C.TRACK_TYPE_TEXT)
+                    val hasSelected = rawSubs.any { it.selection > -1 }
+                    val noneTrack = Media3PlayerTrack(
+                        trackType = C.TRACK_TYPE_TEXT,
+                        groupIndex = -1,
+                        trackIndex = -1,
+                        title = "None",
+                        language = "none",
+                        selection = if (!hasSelected) 0 else -1,
+                    )
                     listener.onTracksChanged(
                         audio = tracks.toPlayerTracks(C.TRACK_TYPE_AUDIO),
-                        subtitles = tracks.toPlayerTracks(C.TRACK_TYPE_TEXT),
+                        subtitles = listOf(noneTrack) + rawSubs,
                     )
                 }
             },
         )
+        val subtitleConfigs = video.subtitleTracks.filter {
+            it.lang != "none" && it.url.isNotBlank()
+        }.map { track ->
+            val uri = Uri.parse(track.url)
+            val mimeType = if (track.url.contains(".vtt")) {
+                MimeTypes.TEXT_VTT
+            } else {
+                MimeTypes.TEXT_SSA
+            }
+            val isEnglish = track.lang.startsWith("en", ignoreCase = true)
+            MediaItem.SubtitleConfiguration.Builder(uri)
+                .setMimeType(mimeType)
+                .setLanguage(track.lang)
+                .setLabel(getLanguageDisplayName(track.lang))
+                .setSelectionFlags(if (isEnglish) C.SELECTION_FLAG_DEFAULT else 0)
+                .build()
+        }
+
         engine.setMediaItem(
             MediaItem.Builder()
                 .setUri(video.videoUrl)
                 .setMimeType(MimeTypes.APPLICATION_MPD)
+                .setSubtitleConfigurations(subtitleConfigs)
                 .setDrmConfiguration(
                     MediaItem.DrmConfiguration.Builder(C.WIDEVINE_UUID)
                         .setLicenseUri(Uri.parse(drm.licenseUrl))
@@ -107,6 +136,17 @@ class Media3DrmPlayer(
                 .build(),
             startPositionSeconds * 1000L,
         )
+
+        val params = engine.trackSelectionParameters.buildUpon()
+        val res = video.resolution
+        if (res != null && res > 0) {
+            params.setMaxVideoSize(Int.MAX_VALUE, res)
+                .setMinVideoSize(0, res)
+        } else {
+            params.clearVideoSizeConstraints()
+        }
+        engine.trackSelectionParameters = params.build()
+
         engine.prepare()
         engine.play()
     }
@@ -135,11 +175,30 @@ class Media3DrmPlayer(
         playerView?.resizeMode = resizeMode
     }
 
+    fun setVideoResolution(height: Int?) {
+        val engine = player ?: return
+        val parameters = engine.trackSelectionParameters.buildUpon()
+        if (height == null || height <= 0) {
+            parameters.clearVideoSizeConstraints()
+        } else {
+            parameters.setMaxVideoSize(Int.MAX_VALUE, height)
+                .setMinVideoSize(0, height)
+        }
+        engine.trackSelectionParameters = parameters.build()
+    }
+
     fun selectTrack(track: Media3PlayerTrack) {
         val engine = player ?: return
         val parameters = engine.trackSelectionParameters.buildUpon()
-        if (track.trackType == C.TRACK_TYPE_TEXT && track.selection > -1) {
-            parameters.clearOverridesOfType(C.TRACK_TYPE_TEXT)
+        if (track.trackType == C.TRACK_TYPE_TEXT) {
+            if (track.groupIndex == -1 || track.language == "none" || track.selection > -1) {
+                parameters.clearOverridesOfType(C.TRACK_TYPE_TEXT)
+                parameters.setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
+            } else {
+                val group = engine.currentTracks.groups.getOrNull(track.groupIndex) ?: return
+                parameters.setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false)
+                parameters.setOverrideForType(TrackSelectionOverride(group.mediaTrackGroup, track.trackIndex))
+            }
         } else {
             val group = engine.currentTracks.groups.getOrNull(track.groupIndex) ?: return
             parameters.setOverrideForType(TrackSelectionOverride(group.mediaTrackGroup, track.trackIndex))
@@ -177,16 +236,45 @@ private fun Tracks.toPlayerTracks(trackType: Int): List<Media3PlayerTrack> = gro
     if (group.type != trackType) return@mapIndexedNotNull null
     List(group.length) { trackIndex ->
         val format = group.getTrackFormat(trackIndex)
+        val title = format.label?.ifBlank { null }
+            ?: format.language?.let { getLanguageDisplayName(it) }
+            ?: ""
         Media3PlayerTrack(
             trackType = trackType,
             groupIndex = groupIndex,
             trackIndex = trackIndex,
-            title = format.label.orEmpty(),
+            title = title,
             language = format.language.orEmpty(),
             selection = if (group.isTrackSelected(trackIndex)) 0 else -1,
         )
     }
 }.flatten()
+
+fun getLanguageDisplayName(locale: String): String {
+    return when (locale.lowercase()) {
+        "en-us", "en" -> "English"
+        "es-419", "es-la" -> "Spanish (Latin America)"
+        "es-es", "es" -> "Spanish (Spain)"
+        "pt-br", "pt" -> "Portuguese (Brazil)"
+        "fr-fr", "fr" -> "French"
+        "de-de", "de" -> "German"
+        "it-it", "it" -> "Italian"
+        "ar-sa", "ar-me", "ar" -> "Arabic"
+        "ru-ru", "ru" -> "Russian"
+        "hi-in", "hi" -> "Hindi"
+        "ta-in", "ta" -> "Tamil"
+        "te-in", "te" -> "Telugu"
+        "id-id", "id" -> "Indonesian"
+        "ms-my", "ms" -> "Malay"
+        "th-th", "th" -> "Thai"
+        "vi-vn", "vi" -> "Vietnamese"
+        "zh-cn", "zh-hk", "zh-tw", "zh" -> "Chinese"
+        "ko-kr", "ko" -> "Korean"
+        "pl-pl", "pl" -> "Polish"
+        "ja-jp", "ja" -> "Japanese"
+        else -> locale
+    }
+}
 
 private fun Headers?.toMap(): Map<String, String> = this?.let { headers ->
     buildMap {
