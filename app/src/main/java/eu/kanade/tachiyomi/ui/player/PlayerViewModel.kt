@@ -3098,7 +3098,13 @@ class PlayerViewModel(
     private var originalSpeed = 0.0
     private var speed = 0.0
     fun onDoubleSpeedStart() {
-        originalSpeed = mpv.getPropertyDouble("speed") ?: 1.0
+        // AM (MEDIA3_DRM_PLAYER) -->
+        originalSpeed = if (stateData.value.isMedia3Playback) {
+            media3Player.getPlaybackSpeed().toDouble()
+        } else {
+            mpv.getPropertyDouble("speed") ?: 1.0
+        }
+        // <-- AM (MEDIA3_DRM_PLAYER)
         speed = 2.0
         setSpeed(speed)
     }
@@ -3112,13 +3118,25 @@ class PlayerViewModel(
     }
 
     fun onDoubleSpeedEnd() {
-        mpv.setPropertyDouble("speed", originalSpeed)
+        // AM (MEDIA3_DRM_PLAYER) -->
+        if (stateData.value.isMedia3Playback) {
+            media3Player.setPlaybackSpeed(originalSpeed.toFloat())
+        } else {
+            mpv.setPropertyDouble("speed", originalSpeed)
+        }
+        // <-- AM (MEDIA3_DRM_PLAYER)
         speed = 0.0
         updateUiData { it.copy(playerUpdate = PlayerUpdates.None) }
     }
 
     private fun setSpeed(speed: Double) {
-        mpv.setPropertyDouble("speed", speed)
+        // AM (MEDIA3_DRM_PLAYER) -->
+        if (stateData.value.isMedia3Playback) {
+            media3Player.setPlaybackSpeed(speed.toFloat())
+        } else {
+            mpv.setPropertyDouble("speed", speed)
+        }
+        // <-- AM (MEDIA3_DRM_PLAYER)
         updateUiData { it.copy(playerUpdate = PlayerUpdates.DoubleSpeed(speed.toFloat())) }
     }
 

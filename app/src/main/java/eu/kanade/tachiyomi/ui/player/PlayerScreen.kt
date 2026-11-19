@@ -321,6 +321,17 @@ fun PlayerScreen(
                 text = playbackData.seekText,
                 interactionSource = interactionSource,
             )
+
+            // AM (MEDIA3_DRM_PLAYER) -->
+            LaunchedEffect(playbackData.doubleTapSeekAmount) {
+                delay(0.8.seconds)
+                viewModel.updateSeekAmount(0)
+                viewModel.updateSeekText(null)
+                delay(0.1.seconds)
+                viewModel.hideSeekBar()
+            }
+            // <-- AM (MEDIA3_DRM_PLAYER)
+
             VolumeBrightnessFeedback(
                 stateData = stateData,
                 uiData = uiData,
@@ -328,10 +339,32 @@ fun PlayerScreen(
                 onVolumeVisibilityChange = viewModel::displayVolumeSlider,
                 onBrightnessVisibilityChange = viewModel::displayBrightnessSlider,
             )
+
+            // AM (MEDIA3_DRM_PLAYER) -->
+            SystemBarOverlay(
+                showStatusBar = uiData.statusBarShown,
+            )
+
+            var resetControls by remember { mutableStateOf(true) }
+
+            LaunchedEffect(
+                uiData.controlsShown,
+                playbackData.paused,
+                playbackData.isSeeking,
+                resetControls,
+            ) {
+                if (uiData.controlsShown && !playbackData.paused && !playbackData.isSeeking) {
+                    delay(uiData.playerTimeToDisappearMs.milliseconds)
+                    viewModel.hideControls()
+                }
+            }
+
             CompositionLocalProvider(
                 LocalRippleConfiguration provides playerRippleConfiguration,
+                LocalPlayerButtonsClickEvent provides { resetControls = !resetControls },
                 LocalContentColor provides Color.White,
             ) {
+            // <-- AM (MEDIA3_DRM_PLAYER)
                 PlayerControls(
                     isLandscape = isLandscape,
                     stateData = stateData,

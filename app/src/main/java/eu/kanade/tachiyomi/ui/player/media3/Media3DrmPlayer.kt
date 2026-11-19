@@ -171,6 +171,8 @@ class Media3DrmPlayer(
         player?.setPlaybackSpeed(speed)
     }
 
+    fun getPlaybackSpeed(): Float = player?.playbackParameters?.speed ?: 1.0f
+
     fun setResizeMode(resizeMode: Int) {
         playerView?.resizeMode = resizeMode
     }
