@@ -370,6 +370,7 @@ fun PlayerControls(
                     castLoading = stateData.isLoadingCasting,
                     castError = stateData.isErrorCasting,
                     isPipAvailable = capabilities.pictureInPicture && stateData.isPipAvailable,
+                    showScreenshot = capabilities.screenshots,
                     showAspectRatio = capabilities.aspectRatio,
                     onPipClick = { onPlayerEvent(PlayerEvent.EnterPip) },
                     onScrenshotClick = { onPlayerEvent(PlayerEvent.SetSheet(Sheets.Screenshot)) },

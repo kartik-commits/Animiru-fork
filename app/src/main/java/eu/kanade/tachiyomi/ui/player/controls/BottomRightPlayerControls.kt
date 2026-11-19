@@ -36,6 +36,7 @@ fun BottomRightPlayerControls(
     castLoading: Boolean,
     castError: Boolean,
     isPipAvailable: Boolean,
+    showScreenshot: Boolean = true,
     showAspectRatio: Boolean = true,
     onAspectClick: () -> Unit,
     onPipClick: () -> Unit,
@@ -51,11 +52,13 @@ fun BottomRightPlayerControls(
             )
         }
 
-        ControlsButton(
-            MaterialSymbols.Rounded.PhotoCamera,
-            onClick = onScrenshotClick,
-            verticalSpacing = MaterialTheme.padding.small,
-        )
+        if (showScreenshot) {
+            ControlsButton(
+                MaterialSymbols.Rounded.PhotoCamera,
+                onClick = onScrenshotClick,
+                verticalSpacing = MaterialTheme.padding.small,
+            )
+        }
 
         if (isPipAvailable) {
             ControlsButton(
