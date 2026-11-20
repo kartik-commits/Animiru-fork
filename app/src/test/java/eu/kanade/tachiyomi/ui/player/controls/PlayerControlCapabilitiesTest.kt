@@ -28,7 +28,7 @@ class PlayerControlCapabilitiesTest {
         assertTrue(capabilities.quality)
         assertFalse(capabilities.more)
         assertFalse(capabilities.cast)
-        assertFalse(capabilities.pictureInPicture)
+        assertTrue(capabilities.pictureInPicture)
         assertTrue(capabilities.aspectRatio)
         assertFalse(capabilities.screenshots)
     }

@@ -470,7 +470,6 @@ class PlayerActivity : BaseActivity() {
                 playlistPosition = viewModel.stateData.value.currentPlaylistIndex,
             ),
         )
-        builder.setSourceRectHint(pipRect)
         viewModel.stateData.value.let {
             val rational = if (it.videoWidth > 0 && it.videoHeight > 0) {
                 Rational(it.videoWidth, it.videoHeight)
@@ -479,6 +478,27 @@ class PlayerActivity : BaseActivity() {
             }
             if (rational.toDouble() in 0.42..2.38) {
                 builder.setAspectRatio(rational)
+                val baseRect = pipRect
+                if (baseRect != null && baseRect.width() > 0 && baseRect.height() > 0) {
+                    val w = baseRect.width()
+                    val h = baseRect.height()
+                    val targetAspect = rational.toDouble()
+                    val sourceAspect = w.toDouble() / h.toDouble()
+                    val adjusted = if (sourceAspect > targetAspect) {
+                        val cw = (h * targetAspect).toInt()
+                        val off = (w - cw) / 2
+                        Rect(baseRect.left + off, baseRect.top, baseRect.left + off + cw, baseRect.bottom)
+                    } else {
+                        val ch = (w / targetAspect).toInt()
+                        val off = (h - ch) / 2
+                        Rect(baseRect.left, baseRect.top + off, baseRect.right, baseRect.top + off + ch)
+                    }
+                    builder.setSourceRectHint(adjusted)
+                } else {
+                    builder.setSourceRectHint(baseRect)
+                }
+            } else {
+                builder.setSourceRectHint(pipRect)
             }
         }
         return builder.build()

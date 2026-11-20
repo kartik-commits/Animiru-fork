@@ -54,112 +54,115 @@ class Media3DrmPlayer(
         val drm = video.drm ?: return
         require(video.videoUrl.startsWith("https://")) { "Protected media URL must use HTTPS" }
         require(drm.licenseUrl.startsWith("https://")) { "DRM license URL must use HTTPS" }
-        release(notify = false)
-        listener.onLoading()
+        runOnMainThread {
+            release(notify = false)
+            listener.onLoading()
 
-        val mediaFactory = DefaultHttpDataSource.Factory()
-            .setDefaultRequestProperties(video.headers.toMap())
-            .setAllowCrossProtocolRedirects(false)
-        val engine = ExoPlayer.Builder(appContext)
-            .setMediaSourceFactory(
-                androidx.media3.exoplayer.source.DefaultMediaSourceFactory(appContext)
-                    .setDataSourceFactory(mediaFactory),
-            )
-            .setAudioAttributes(AudioAttributes.DEFAULT, true)
-            .setHandleAudioBecomingNoisy(true)
-            .build()
-        player = engine
-        playerView?.player = engine
-        engine.addListener(
-            object : Player.Listener {
-                override fun onPlaybackStateChanged(playbackState: Int) {
-                    if (player !== engine) return
-                    when (playbackState) {
-                        Player.STATE_READY -> listener.onReady(engine.duration.coerceAtLeast(0L))
-                        Player.STATE_ENDED -> listener.onEnded()
-                    }
-                }
-
-                override fun onIsPlayingChanged(isPlaying: Boolean) {
-                    if (player !== engine) return
-                    listener.onPlayingChanged(isPlaying)
-                }
-
-                override fun onPlayerError(error: PlaybackException) {
-                    if (player !== engine) return
-                    listener.onError(error.errorCodeName)
-                    release(notify = false)
-                }
-
-                override fun onRenderedFirstFrame() {
-                    if (player !== engine) return
-                    listener.onFirstFrame()
-                }
-
-                override fun onTracksChanged(tracks: Tracks) {
-                    if (player !== engine) return
-                    val rawSubs = tracks.toPlayerTracks(C.TRACK_TYPE_TEXT)
-                    val hasSelected = rawSubs.any { it.selection > -1 }
-                    val noneTrack = Media3PlayerTrack(
-                        trackType = C.TRACK_TYPE_TEXT,
-                        groupIndex = -1,
-                        trackIndex = -1,
-                        title = "None",
-                        language = "none",
-                        selection = if (!hasSelected) 0 else -1,
-                    )
-                    listener.onTracksChanged(
-                        audio = tracks.toPlayerTracks(C.TRACK_TYPE_AUDIO),
-                        subtitles = listOf(noneTrack) + rawSubs,
-                    )
-                }
-            },
-        )
-        val subtitleConfigs = video.subtitleTracks.filter {
-            it.lang != "none" && it.url.isNotBlank()
-        }.map { track ->
-            val uri = Uri.parse(track.url)
-            val mimeType = if (track.url.contains(".vtt")) {
-                MimeTypes.TEXT_VTT
-            } else {
-                MimeTypes.TEXT_SSA
-            }
-            val isEnglish = track.lang.startsWith("en", ignoreCase = true)
-            MediaItem.SubtitleConfiguration.Builder(uri)
-                .setMimeType(mimeType)
-                .setLanguage(track.lang)
-                .setLabel(getLanguageDisplayName(track.lang))
-                .setSelectionFlags(if (isEnglish) C.SELECTION_FLAG_DEFAULT else 0)
-                .build()
-        }
-
-        engine.setMediaItem(
-            MediaItem.Builder()
-                .setUri(video.videoUrl)
-                .setMimeType(MimeTypes.APPLICATION_MPD)
-                .setSubtitleConfigurations(subtitleConfigs)
-                .setDrmConfiguration(
-                    MediaItem.DrmConfiguration.Builder(C.WIDEVINE_UUID)
-                        .setLicenseUri(Uri.parse(drm.licenseUrl))
-                        .setLicenseRequestHeaders(drm.licenseHeaders.toMap())
-                        .build(),
+            val mediaFactory = DefaultHttpDataSource.Factory()
+                .setDefaultRequestProperties(video.headers.toMap())
+                .setAllowCrossProtocolRedirects(false)
+            val engine = ExoPlayer.Builder(appContext)
+                .setLooper(Looper.getMainLooper())
+                .setMediaSourceFactory(
+                    androidx.media3.exoplayer.source.DefaultMediaSourceFactory(appContext)
+                        .setDataSourceFactory(mediaFactory),
                 )
-                .build(),
-            startPositionSeconds * 1000L,
-        )
+                .setAudioAttributes(AudioAttributes.DEFAULT, true)
+                .setHandleAudioBecomingNoisy(true)
+                .build()
+            player = engine
+            playerView?.player = engine
+            engine.addListener(
+                object : Player.Listener {
+                    override fun onPlaybackStateChanged(playbackState: Int) {
+                        if (player !== engine) return
+                        when (playbackState) {
+                            Player.STATE_READY -> listener.onReady(engine.duration.coerceAtLeast(0L))
+                            Player.STATE_ENDED -> listener.onEnded()
+                        }
+                    }
 
-        val params = engine.trackSelectionParameters.buildUpon()
-        val res = video.resolution
-        if (res != null && res > 0) {
-            params.setMaxVideoSize(Int.MAX_VALUE, res)
-                .setMinVideoSize(0, res)
-        } else {
-            params.clearVideoSizeConstraints()
+                    override fun onIsPlayingChanged(isPlaying: Boolean) {
+                        if (player !== engine) return
+                        listener.onPlayingChanged(isPlaying)
+                    }
+
+                    override fun onPlayerError(error: PlaybackException) {
+                        if (player !== engine) return
+                        listener.onError(error.errorCodeName)
+                        release(notify = false)
+                    }
+
+                    override fun onRenderedFirstFrame() {
+                        if (player !== engine) return
+                        listener.onFirstFrame()
+                    }
+
+                    override fun onTracksChanged(tracks: Tracks) {
+                        if (player !== engine) return
+                        val rawSubs = tracks.toPlayerTracks(C.TRACK_TYPE_TEXT)
+                        val hasSelected = rawSubs.any { it.selection > -1 }
+                        val noneTrack = Media3PlayerTrack(
+                            trackType = C.TRACK_TYPE_TEXT,
+                            groupIndex = -1,
+                            trackIndex = -1,
+                            title = "None",
+                            language = "none",
+                            selection = if (!hasSelected) 0 else -1,
+                        )
+                        listener.onTracksChanged(
+                            audio = tracks.toPlayerTracks(C.TRACK_TYPE_AUDIO),
+                            subtitles = listOf(noneTrack) + rawSubs,
+                        )
+                    }
+                },
+            )
+            val subtitleConfigs = video.subtitleTracks.filter {
+                it.lang != "none" && it.url.isNotBlank()
+            }.map { track ->
+                val uri = Uri.parse(track.url)
+                val mimeType = if (track.url.contains(".vtt")) {
+                    MimeTypes.TEXT_VTT
+                } else {
+                    MimeTypes.TEXT_SSA
+                }
+                val isEnglish = track.lang.startsWith("en", ignoreCase = true)
+                MediaItem.SubtitleConfiguration.Builder(uri)
+                    .setMimeType(mimeType)
+                    .setLanguage(track.lang)
+                    .setLabel(getLanguageDisplayName(track.lang))
+                    .setSelectionFlags(if (isEnglish) C.SELECTION_FLAG_DEFAULT else 0)
+                    .build()
+            }
+
+            engine.setMediaItem(
+                MediaItem.Builder()
+                    .setUri(video.videoUrl)
+                    .setMimeType(MimeTypes.APPLICATION_MPD)
+                    .setSubtitleConfigurations(subtitleConfigs)
+                    .setDrmConfiguration(
+                        MediaItem.DrmConfiguration.Builder(C.WIDEVINE_UUID)
+                            .setLicenseUri(Uri.parse(drm.licenseUrl))
+                            .setLicenseRequestHeaders(drm.licenseHeaders.toMap())
+                            .build(),
+                    )
+                    .build(),
+                startPositionSeconds * 1000L,
+            )
+
+            val params = engine.trackSelectionParameters.buildUpon()
+            val res = video.resolution
+            if (res != null && res > 0) {
+                params.setMaxVideoSize(Int.MAX_VALUE, res)
+                    .setMinVideoSize(0, res)
+            } else {
+                params.clearVideoSizeConstraints()
+            }
+            engine.trackSelectionParameters = params.build()
+
+            engine.prepare()
+            engine.play()
         }
-        engine.trackSelectionParameters = params.build()
-
-        engine.prepare()
-        engine.play()
     }
 
     fun pause() {
@@ -225,12 +228,14 @@ class Media3DrmPlayer(
 
     fun release(notify: Boolean = true) {
         runOnMainThread {
+            mainHandler.removeCallbacksAndMessages(null)
             val engine = player ?: return@runOnMainThread
             val position = engine.currentPosition.coerceAtLeast(0L)
             val duration = engine.duration.coerceAtLeast(0L)
             player = null
             playerView?.player = null
             playerView?.keepScreenOn = false
+            engine.stop()
             engine.release()
             if (notify) listener.onReleased(position, duration)
         }
