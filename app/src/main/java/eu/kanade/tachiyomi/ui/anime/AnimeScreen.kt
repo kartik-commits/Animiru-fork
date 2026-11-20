@@ -159,7 +159,7 @@ class AnimeScreen(
             },
             onDownloadEpisode = viewModel::runEpisodeDownloadActions.takeIf {
                 // AY -->
-                !successState.source.isLocalOrStub() && successState.anime.fetchType == FetchType.Episodes
+                !successState.source.isLocalOrStub()
                 // <-- AY
             },
             downloadProgressProvider = viewModel::getDownloadProgress,
@@ -224,7 +224,7 @@ class AnimeScreen(
             }.takeIf { isConfigurableSource },
             onSkipIntroClicked = viewModel::showAnimeSkipIntroDialog.takeIf {
                 // AY -->
-                successState.anime.favorite && successState.anime.fetchType == FetchType.Episodes
+                successState.anime.favorite
                 // <-- AY
             },
             onMoreRelatedClicked = {
@@ -250,6 +250,7 @@ class AnimeScreen(
             onSeasonClicked = {
                 navigator.push(AnimeScreen(it.id))
             },
+            onSelectSeason = viewModel::selectSeason,
             onContinueWatchingClicked = {
                 scope.launch(Dispatchers.IO) {
                     val episode = viewModel.getNextUnseenEpisode(it.anime)
@@ -274,9 +275,7 @@ class AnimeScreen(
         val onDismissRequest = {
             viewModel.dismissDialog()
             // AY -->
-            if (viewModel.autoOpenTrack && viewModel.isFromChangeCategory &&
-                successState.anime.fetchType == FetchType.Episodes
-            ) {
+            if (viewModel.autoOpenTrack && viewModel.isFromChangeCategory) {
                 viewModel.isFromChangeCategory = false
                 viewModel.showTrackDialog()
             }

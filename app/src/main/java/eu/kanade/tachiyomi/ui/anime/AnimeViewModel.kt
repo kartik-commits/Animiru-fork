@@ -84,10 +84,12 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.emitAll
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.filterIsInstance
+import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.flow.stateIn
@@ -301,20 +303,48 @@ class AnimeViewModel(
         }
     }
 
-    private val animeAndEpisodesAndSeasons = combine(
-        flow {
-            // So an entry outside the library isn't shown with its old episode settings first
-            defaultFlagsJob.join()
-            emitAll(getAnimeAndEpisodesAndSeasons.subscribe(animeId, applyScanlatorFilter = true))
+    val selectedSeasonId = MutableStateFlow<Long?>(null)
+
+    private val baseAnimeAndEpisodesAndSeasons = flow {
+        // So an entry outside the library isn't shown with its old episode settings first
+        defaultFlagsJob.join()
+        emitAll(getAnimeAndEpisodesAndSeasons.subscribe(animeId, applyScanlatorFilter = true))
+    }.distinctUntilChanged()
+
+    private val activeSeasonIdFlow = combine(
+        baseAnimeAndEpisodesAndSeasons,
+        selectedSeasonId,
+    ) { (anime, _, seasons), selectedId ->
+        if (anime.fetchType == FetchType.Seasons && seasons.isNotEmpty()) {
+            selectedId?.takeIf { id -> seasons.any { it.anime.id == id } }
+                ?: seasons.firstOrNull { !it.seen }?.anime?.id
+                ?: seasons.firstOrNull()?.anime?.id
+        } else {
+            null
         }
-            .distinctUntilChanged(),
+    }.distinctUntilChanged()
+
+    private val targetEpisodesFlow = activeSeasonIdFlow.flatMapLatest { seasonId ->
+        val targetId = seasonId ?: animeId
+        getEpisodesByAnimeId.subscribe(targetId, applyScanlatorFilter = true)
+    }.distinctUntilChanged()
+
+    private val animeAndEpisodesAndSeasons = combine(
+        baseAnimeAndEpisodesAndSeasons,
+        targetEpisodesFlow,
+        activeSeasonIdFlow,
         downloadCache.changes.pausedWhileUnsubscribed(),
         downloadManager.queueState.pausedWhileUnsubscribed(),
-    ) { (anime, episodes, seasons), _, _ ->
+    ) { (anime, defaultEpisodes, seasons), activeEpisodes, activeSeasonId, _, _ ->
+        val seasonAnime = seasons.find { it.anime.id == activeSeasonId }?.anime
+        val targetAnime = seasonAnime ?: anime
+        val rawEpisodes = if (anime.fetchType == FetchType.Seasons) activeEpisodes else defaultEpisodes
         AnimeAndEpisodesAndSeasons(
             anime = anime,
+            selectedSeasonAnime = seasonAnime,
+            selectedSeasonId = activeSeasonId,
             source = sourceManager.getOrStub(anime.source),
-            episodes = episodes.toEpisodeListItems(anime),
+            episodes = rawEpisodes.toEpisodeListItems(targetAnime),
             seasons = seasons.toAnimeSeasonItems(),
         )
     }
@@ -394,6 +424,8 @@ class AnimeViewModel(
             },
             // AM -->
             seasons = animeAndEpisodesAndSeasons.seasons,
+            selectedSeasonId = animeAndEpisodesAndSeasons.selectedSeasonId,
+            selectedSeasonAnime = animeAndEpisodesAndSeasons.selectedSeasonAnime,
             // <-- AM
             availableScanlators = availableScanlators,
             excludedScanlators = excludedScanlators,
@@ -478,6 +510,54 @@ class AnimeViewModel(
                 )
             }
             isRefreshingData.value = false
+        }
+
+        activeSeasonIdFlow
+            .filterNotNull()
+            .onEach { seasonId ->
+                val localEpisodes = getEpisodesByAnimeId.await(seasonId)
+                if (localEpisodes.isEmpty()) {
+                    try {
+                        val state = successState
+                        val source = state?.source ?: sourceManager.getOrStub(getAnimeAndEpisodesAndSeasons.awaitAnime(animeId).source)
+                        val seasonAnime = getAnimeAndEpisodesAndSeasons.awaitAnime(seasonId)
+                        if (seasonAnime.fetchType == FetchType.Episodes) {
+                            updateAnimeFromRemote.awaitEpisodesUpdate(
+                                source = source,
+                                anime = seasonAnime,
+                                fetchEpisodes = true,
+                                manualFetch = false,
+                            )
+                        }
+                    } catch (e: Exception) {
+                        logcat(LogPriority.ERROR, e)
+                    }
+                }
+            }
+            .launchIn(viewModelScope)
+    }
+
+    fun selectSeason(seasonId: Long) {
+        selectedSeasonId.value = seasonId
+        viewModelScope.launch(Dispatchers.IO) {
+            val localEpisodes = getEpisodesByAnimeId.await(seasonId)
+            if (localEpisodes.isEmpty()) {
+                try {
+                    val state = successState
+                    val source = state?.source ?: sourceManager.getOrStub(getAnimeAndEpisodesAndSeasons.awaitAnime(animeId).source)
+                    val seasonAnime = getAnimeAndEpisodesAndSeasons.awaitAnime(seasonId)
+                    if (seasonAnime.fetchType == FetchType.Episodes) {
+                        updateAnimeFromRemote.awaitEpisodesUpdate(
+                            source = source,
+                            anime = seasonAnime,
+                            fetchEpisodes = true,
+                            manualFetch = false,
+                        )
+                    }
+                } catch (e: Exception) {
+                    logcat(LogPriority.ERROR, e)
+                }
+            }
         }
     }
 
@@ -580,6 +660,23 @@ class AnimeViewModel(
                         manualFetch = manualFetch,
                     )
                         .getOrThrow()
+
+                    val activeId = selectedSeasonId.value ?: update.newSeasons.firstOrNull()?.id
+                    if (activeId != null) {
+                        try {
+                            val seasonAnime = getAnimeAndEpisodesAndSeasons.awaitAnime(activeId)
+                            if (seasonAnime.fetchType == FetchType.Episodes) {
+                                updateAnimeFromRemote.awaitEpisodesUpdate(
+                                    source = source,
+                                    anime = seasonAnime,
+                                    fetchEpisodes = true,
+                                    manualFetch = manualFetch,
+                                )
+                            }
+                        } catch (e: Exception) {
+                            logcat(LogPriority.ERROR, e)
+                        }
+                    }
 
                     if (libraryPreferences.updateSeasonOnRefresh.get()) {
                         viewModelScope.async {
@@ -1023,7 +1120,7 @@ class AnimeViewModel(
      */
     fun getNextUnseenEpisode(): Episode? {
         val successState = successState ?: return null
-        return successState.episodes.getNextUnseen(successState.anime)
+        return successState.episodes.getNextUnseen(successState.selectedSeasonAnime ?: successState.anime)
     }
 
     private fun getUnseenEpisodes(): List<Episode> {
@@ -1240,7 +1337,7 @@ class AnimeViewModel(
         video: Video? = null,
         // <-- AY
     ) {
-        val anime = successState?.anime ?: return
+        val anime = successState?.selectedSeasonAnime ?: successState?.anime ?: return
         downloadManager.downloadEpisodes(anime, episodes, true, alt, video)
     }
 
@@ -1864,11 +1961,7 @@ class AnimeViewModel(
     }
 
     fun showSettingsDialog() {
-        val anime = successState?.anime ?: return
-        dialog.value = when (anime.fetchType) {
-            FetchType.Episodes -> Dialog.EpisodeSettingsSheet
-            FetchType.Seasons -> Dialog.SeasonSettingsSheet
-        }
+        dialog.value = Dialog.EpisodeSettingsSheet
     }
 
     fun showTrackDialog() {
@@ -1910,6 +2003,8 @@ class AnimeViewModel(
 
     private data class AnimeAndEpisodesAndSeasons(
         val anime: Anime,
+        val selectedSeasonAnime: Anime?,
+        val selectedSeasonId: Long?,
         val source: AnimeSource,
         val episodes: List<EpisodeList.Item>,
         val seasons: List<AnimeSeasonItem>,
@@ -1927,6 +2022,8 @@ class AnimeViewModel(
             val episodes: List<EpisodeList.Item>,
             // AY -->
             val seasons: List<AnimeSeasonItem>,
+            val selectedSeasonId: Long? = null,
+            val selectedSeasonAnime: Anime? = null,
             // <-- AY
             val availableScanlators: Set<String>,
             val excludedScanlators: Set<String>,
@@ -1951,6 +2048,10 @@ class AnimeViewModel(
             // <-- AY
         ) : State {
             // AY -->
+            val selectedSeason by lazy {
+                seasons.firstOrNull { it.seasonAnime.anime.id == selectedSeasonId }
+            }
+
             val processedSeasons by lazy {
                 seasons.applySeasonFilters(anime).toList()
             }
@@ -1987,12 +2088,10 @@ class AnimeViewModel(
             }
 
             val missingItemCount by lazy {
-                if (hideMissingEpisodes) return@lazy 0
+                if (hideMissingEpisodes || anime.fetchType == FetchType.Seasons) return@lazy 0
                 // AM -->
                 when (anime.fetchType) {
-                    FetchType.Seasons -> {
-                        processedSeasons.fastMap { it.seasonAnime.anime.seasonNumber }.missingEntriesCount()
-                    }
+                    FetchType.Seasons -> 0
                     FetchType.Episodes -> {
                         processedEpisodes.fastMap { it.episode.episodeNumber }.missingEntriesCount()
                     }
@@ -2001,7 +2100,7 @@ class AnimeViewModel(
             }
 
             val episodeListItems by lazy {
-                if (hideMissingEpisodes) {
+                if (hideMissingEpisodes || anime.fetchType == FetchType.Seasons) {
                     return@lazy processedEpisodes
                 }
 

@@ -46,7 +46,19 @@ class AddTracks(
 
         // AM -->
         when (anime.fetchType) {
-            FetchType.Seasons -> { }
+            FetchType.Seasons -> {
+                val seasons = getAnimeSeasonsByParentId.await(anime.id)
+                val allChildEpisodes = seasons.flatMap { getEpisodesByAnimeId.await(it.anime.id) }
+                val hasSeenChildEpisodes = allChildEpisodes.any { it.seen }
+                if (hasSeenChildEpisodes) {
+                    val seenCount = allChildEpisodes.count { it.seen }.toDouble()
+                    if (seenCount > track.lastEpisodeSeen) {
+                        track = track.copy(lastEpisodeSeen = seenCount)
+                        tracker.setRemoteLastEpisodeSeen(track.toDbTrack(), seenCount.toInt())
+                        upsertTrack.await(track)
+                    }
+                }
+            }
             // <-- AM
             FetchType.Episodes -> {
                 // TODO: merge into [SyncEpisodeProgressWithTrack]?

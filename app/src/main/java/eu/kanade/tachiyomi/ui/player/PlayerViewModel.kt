@@ -967,7 +967,7 @@ class PlayerViewModel(
                 updateUiData { it.copy(animeTitle = anime.title) }
                 episodeId = initialEpisodeId
 
-                setupTrackers(anime.id)
+                setupTrackers(anime)
                 setupEpisodeList(anime)
 
                 val episode = stateData.value.currentPlaylist.firstOrNull { it.id == episodeId }
@@ -1038,9 +1038,10 @@ class PlayerViewModel(
         }
     }
 
-    private suspend fun setupTrackers(animeId: Long) {
-        val tracks = getTracks.await(animeId)
-        updateStateData { it.copy(hasTrackers = tracks.isNotEmpty()) }
+    private suspend fun setupTrackers(anime: Anime) {
+        val tracks = getTracks.await(anime.id)
+        val parentTracks = anime.parentId?.let { getTracks.await(it) }.orEmpty()
+        updateStateData { it.copy(hasTrackers = tracks.isNotEmpty() || parentTracks.isNotEmpty()) }
     }
 
     private suspend fun setupEpisodeList(anime: Anime) {
