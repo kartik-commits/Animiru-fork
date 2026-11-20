@@ -13,8 +13,8 @@ fun getEpisodeSort(
 ) -> Int {
     return when (anime.sorting) {
         Anime.EPISODE_SORTING_SOURCE -> when (sortDescending) {
-            true -> { e1, e2 -> e1.sourceOrder.compareTo(e2.sourceOrder) }
-            false -> { e1, e2 -> e2.sourceOrder.compareTo(e1.sourceOrder) }
+            true -> { e1, e2 -> e2.sourceOrder.compareTo(e1.sourceOrder) }
+            false -> { e1, e2 -> e1.sourceOrder.compareTo(e2.sourceOrder) }
         }
         Anime.EPISODE_SORTING_NUMBER -> when (sortDescending) {
             true -> { e1, e2 -> e2.episodeNumber.compareTo(e1.episodeNumber) }

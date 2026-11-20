@@ -304,6 +304,7 @@ class PlayerViewModel(
 
             override fun onEnded() {
                 updatePlaybackData { it.copy(paused = true) }
+                eofReached(true)
             }
 
             override fun onError(errorCode: String) {
@@ -1722,8 +1723,10 @@ class PlayerViewModel(
 
         // AM (MEDIA3_DRM_PLAYER) -->
         val currentVid = stateData.value.currentVideo
-        val isSameMedia3Stream = stateData.value.isMedia3Playback &&
+        val isSameMedia3Stream = !uiData.value.isLoadingEpisode &&
+            stateData.value.isMedia3Playback &&
             currentVid?.drm != null &&
+            currentVid.videoUrl == video.videoUrl &&
             selectedHosterState.name == eu.kanade.tachiyomi.animesource.model.Hoster.NO_HOSTER_LIST
 
         if (isSameMedia3Stream && currentVid != null) {
@@ -1811,7 +1814,7 @@ class PlayerViewModel(
         qualityIndex = Pair(hosterIndex, videoIndex)
         // AM (MEDIA3_DRM_PLAYER) -->
         if (resolvedVideo.drm != null) {
-            val currentPos = if (stateData.value.isMedia3Playback) {
+            val currentPos = if (stateData.value.isMedia3Playback && !uiData.value.isLoadingEpisode) {
                 (media3Player.currentPositionMs() / 1000L).coerceAtLeast(0L)
             } else {
                 null
@@ -2903,7 +2906,12 @@ class PlayerViewModel(
             clearTracks()
         }
 
-        updateStateData { it.copy(hosterList = emptyList()) }
+        updateStateData {
+            it.copy(
+                hosterList = emptyList(),
+                currentVideo = null,
+            )
+        }
         updateUiData {
             it.copy(
                 sheetShown = Sheets.None,
@@ -2972,7 +2980,7 @@ class PlayerViewModel(
     fun pauseUnpause() {
         // AM (MEDIA3_DRM_PLAYER) -->
         if (stateData.value.isMedia3Playback) {
-            if (playbackData.value.paused) media3Player.play() else media3Player.pause()
+            if (playbackData.value.paused) unpause() else pause()
             return
         }
         // <-- AM (MEDIA3_DRM_PLAYER)

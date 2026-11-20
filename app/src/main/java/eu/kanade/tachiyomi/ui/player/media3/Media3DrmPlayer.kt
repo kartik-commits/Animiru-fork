@@ -2,6 +2,8 @@ package eu.kanade.tachiyomi.ui.player.media3
 
 import android.content.Context
 import android.net.Uri
+import android.os.Handler
+import android.os.Looper
 import androidx.annotation.OptIn
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
@@ -26,8 +28,17 @@ class Media3DrmPlayer(
     private val listener: Listener,
 ) {
     private val appContext = context.applicationContext
+    private val mainHandler = Handler(Looper.getMainLooper())
     private var player: ExoPlayer? = null
     private var playerView: PlayerView? = null
+
+    private fun runOnMainThread(action: () -> Unit) {
+        if (Looper.myLooper() == Looper.getMainLooper()) {
+            action()
+        } else {
+            mainHandler.post(action)
+        }
+    }
 
     fun attach(view: PlayerView) {
         playerView = view
@@ -152,11 +163,11 @@ class Media3DrmPlayer(
     }
 
     fun pause() {
-        player?.pause()
+        runOnMainThread { player?.pause() }
     }
 
     fun play() {
-        player?.play()
+        runOnMainThread { player?.play() }
     }
 
     fun currentPositionMs(): Long = player?.currentPosition?.coerceAtLeast(0L) ?: 0L
@@ -164,59 +175,65 @@ class Media3DrmPlayer(
     fun durationMs(): Long = player?.duration?.coerceAtLeast(0L) ?: 0L
 
     fun seekTo(positionSeconds: Int) {
-        player?.seekTo(positionSeconds.coerceAtLeast(0) * 1000L)
+        runOnMainThread { player?.seekTo(positionSeconds.coerceAtLeast(0) * 1000L) }
     }
 
     fun setPlaybackSpeed(speed: Float) {
-        player?.setPlaybackSpeed(speed)
+        runOnMainThread { player?.setPlaybackSpeed(speed) }
     }
 
     fun getPlaybackSpeed(): Float = player?.playbackParameters?.speed ?: 1.0f
 
     fun setResizeMode(resizeMode: Int) {
-        playerView?.resizeMode = resizeMode
+        runOnMainThread { playerView?.resizeMode = resizeMode }
     }
 
     fun setVideoResolution(height: Int?) {
-        val engine = player ?: return
-        val parameters = engine.trackSelectionParameters.buildUpon()
-        if (height == null || height <= 0) {
-            parameters.clearVideoSizeConstraints()
-        } else {
-            parameters.setMaxVideoSize(Int.MAX_VALUE, height)
-                .setMinVideoSize(0, height)
+        runOnMainThread {
+            val engine = player ?: return@runOnMainThread
+            val parameters = engine.trackSelectionParameters.buildUpon()
+            if (height == null || height <= 0) {
+                parameters.clearVideoSizeConstraints()
+            } else {
+                parameters.setMaxVideoSize(Int.MAX_VALUE, height)
+                    .setMinVideoSize(0, height)
+            }
+            engine.trackSelectionParameters = parameters.build()
         }
-        engine.trackSelectionParameters = parameters.build()
     }
 
     fun selectTrack(track: Media3PlayerTrack) {
-        val engine = player ?: return
-        val parameters = engine.trackSelectionParameters.buildUpon()
-        if (track.trackType == C.TRACK_TYPE_TEXT) {
-            if (track.groupIndex == -1 || track.language == "none" || track.selection > -1) {
-                parameters.clearOverridesOfType(C.TRACK_TYPE_TEXT)
-                parameters.setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
+        runOnMainThread {
+            val engine = player ?: return@runOnMainThread
+            val parameters = engine.trackSelectionParameters.buildUpon()
+            if (track.trackType == C.TRACK_TYPE_TEXT) {
+                if (track.groupIndex == -1 || track.language == "none" || track.selection > -1) {
+                    parameters.clearOverridesOfType(C.TRACK_TYPE_TEXT)
+                    parameters.setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
+                } else {
+                    val group = engine.currentTracks.groups.getOrNull(track.groupIndex) ?: return@runOnMainThread
+                    parameters.setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false)
+                    parameters.setOverrideForType(TrackSelectionOverride(group.mediaTrackGroup, track.trackIndex))
+                }
             } else {
-                val group = engine.currentTracks.groups.getOrNull(track.groupIndex) ?: return
-                parameters.setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false)
+                val group = engine.currentTracks.groups.getOrNull(track.groupIndex) ?: return@runOnMainThread
                 parameters.setOverrideForType(TrackSelectionOverride(group.mediaTrackGroup, track.trackIndex))
             }
-        } else {
-            val group = engine.currentTracks.groups.getOrNull(track.groupIndex) ?: return
-            parameters.setOverrideForType(TrackSelectionOverride(group.mediaTrackGroup, track.trackIndex))
+            engine.trackSelectionParameters = parameters.build()
         }
-        engine.trackSelectionParameters = parameters.build()
     }
 
     fun release(notify: Boolean = true) {
-        val engine = player ?: return
-        val position = engine.currentPosition.coerceAtLeast(0L)
-        val duration = engine.duration.coerceAtLeast(0L)
-        player = null
-        playerView?.player = null
-        playerView?.keepScreenOn = false
-        engine.release()
-        if (notify) listener.onReleased(position, duration)
+        runOnMainThread {
+            val engine = player ?: return@runOnMainThread
+            val position = engine.currentPosition.coerceAtLeast(0L)
+            val duration = engine.duration.coerceAtLeast(0L)
+            player = null
+            playerView?.player = null
+            playerView?.keepScreenOn = false
+            engine.release()
+            if (notify) listener.onReleased(position, duration)
+        }
     }
 
     interface Listener {
