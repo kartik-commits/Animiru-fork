@@ -1,11 +1,13 @@
 package tachiyomi.domain.history.interactor
 
 import dev.zacsweers.metro.Inject
+import eu.kanade.tachiyomi.animesource.model.FetchType
 import tachiyomi.domain.anime.interactor.GetAnime
 import tachiyomi.domain.episode.interactor.GetEpisodesByAnimeId
 import tachiyomi.domain.episode.model.Episode
 import tachiyomi.domain.episode.service.getEpisodeSort
 import tachiyomi.domain.history.repository.HistoryRepository
+import tachiyomi.domain.season.interactor.GetAnimeSeasonsByParentId
 import kotlin.math.max
 
 @Inject
@@ -13,6 +15,9 @@ class GetNextEpisodes(
     private val getEpisodesByAnimeId: GetEpisodesByAnimeId,
     private val getAnime: GetAnime,
     private val historyRepository: HistoryRepository,
+    // AY -->
+    private val getAnimeSeasonsByParentId: GetAnimeSeasonsByParentId,
+    // <-- AY
 ) {
 
     suspend fun await(onlyUnseen: Boolean = true): List<Episode> {
@@ -22,8 +27,23 @@ class GetNextEpisodes(
 
     suspend fun await(animeId: Long, onlyUnseen: Boolean = true): List<Episode> {
         val anime = getAnime.await(animeId) ?: return emptyList()
-        val episodes = getEpisodesByAnimeId.await(animeId, applyScanlatorFilter = true)
-            .sortedWith(getEpisodeSort(anime, sortDescending = false))
+        val targetAnime = if (anime.parentId != null) {
+            getAnime.await(anime.parentId) ?: anime
+        } else {
+            anime
+        }
+
+        val episodes = if (targetAnime.fetchType == FetchType.Seasons) {
+            val seasons = getAnimeSeasonsByParentId.await(targetAnime.id)
+                .sortedWith(compareBy({ it.anime.seasonNumber }, { it.anime.seasonSourceOrder }))
+            seasons.flatMap { season ->
+                getEpisodesByAnimeId.await(season.anime.id, applyScanlatorFilter = true)
+                    .sortedWith(getEpisodeSort(season.anime, sortDescending = false))
+            }
+        } else {
+            getEpisodesByAnimeId.await(targetAnime.id, applyScanlatorFilter = true)
+                .sortedWith(getEpisodeSort(targetAnime, sortDescending = false))
+        }
 
         return if (onlyUnseen) {
             episodes.filterNot { it.seen }

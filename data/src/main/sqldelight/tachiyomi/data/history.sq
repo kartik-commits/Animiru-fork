@@ -17,12 +17,14 @@ CREATE INDEX history_seen_at_index ON history(seen_at);
 getHistoryByAnimeId:
 SELECT id, episode_id, seen_at
 FROM history
-WHERE anime_id = :animeId;
+WHERE anime_id = :animeId
+   OR anime_id IN (SELECT id FROM anime WHERE state_parent_id = :animeId);
 
 getHistoryByAnimeIds:
 SELECT anime_id, id, episode_id, seen_at
 FROM history
 WHERE anime_id IN :animeIds
+   OR anime_id IN (SELECT id FROM anime WHERE state_parent_id IN :animeIds)
 ORDER BY anime_id, id;
 
 resetHistoryById:
@@ -33,7 +35,8 @@ WHERE id = :id;
 resetHistoryByAnimeId:
 UPDATE history
 SET seen_at = NULL
-WHERE anime_id = :animeId;
+WHERE anime_id = :animeId
+   OR anime_id IN (SELECT id FROM anime WHERE state_parent_id = :animeId);
 
 removeAllHistory:
 DELETE FROM history;

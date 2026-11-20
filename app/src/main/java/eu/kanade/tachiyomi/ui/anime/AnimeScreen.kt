@@ -104,6 +104,16 @@ class AnimeScreen(
         }
 
         val successState = state as AnimeViewModel.State.Success
+        // AY -->
+        val parentId = successState.anime.parentId
+        if (parentId != null) {
+            LaunchedEffect(parentId) {
+                navigator.replace(AnimeScreen(parentId))
+            }
+            LoadingScreen()
+            return
+        }
+        // <-- AY
         val isHttpSource = remember { successState.source is AnimeHttpSource }
         // AY -->
         val isConfigurableSource = remember { successState.source is ConfigurableAnimeSource }

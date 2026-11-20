@@ -1,31 +1,38 @@
 CREATE VIEW historyView AS
 SELECT
     history.id AS id,
-    anime.id AS animeId,
+    coalesce(parent.id, anime.id) AS animeId,
     episode.id AS episodeId,
     -- AM -->
-    anime.user_custom_title AS custom_title,
+    coalesce(parent.user_custom_title, anime.user_custom_title) AS custom_title,
     -- <-- AM
-    anime.remote_title AS title,
-    anime.remote_cover AS thumbnailUrl,
-    anime.source_id AS sourceId,
-    anime.user_favorite_at IS NOT NULL AS favorite,
-    anime.state_cover_last_modified AS coverLastModified,
+    coalesce(parent.remote_title, anime.remote_title) AS title,
+    coalesce(nullif(anime.remote_cover, ''), parent.remote_cover) AS thumbnailUrl,
+    coalesce(parent.source_id, anime.source_id) AS sourceId,
+    (coalesce(parent.user_favorite_at, anime.user_favorite_at) IS NOT NULL) AS favorite,
+    coalesce(parent.state_cover_last_modified, anime.state_cover_last_modified) AS coverLastModified,
     episode.remote_episode_number AS episodeNumber,
     history.seen_at AS seenAt,
     max_seen.seen_at AS maxSeenAt,
     max_seen.episode_id AS maxSeenAtEpisodeId
 FROM anime
+LEFT JOIN anime AS parent
+ON anime.state_parent_id = parent.id
 JOIN episode
 ON anime.id = episode.anime_id
 JOIN history
 ON episode.id = history.episode_id
 JOIN (
-    SELECT anime_id, episode_id, MAX(seen_at) AS seen_at
+    SELECT
+        coalesce(anime.state_parent_id, anime.id) AS series_id,
+        history.episode_id,
+        MAX(history.seen_at) AS seen_at
     FROM history
-    GROUP BY anime_id
+    JOIN episode ON history.episode_id = episode.id
+    JOIN anime ON episode.anime_id = anime.id
+    GROUP BY series_id
 ) AS max_seen
-ON episode.anime_id = max_seen.anime_id;
+ON coalesce(anime.state_parent_id, anime.id) = max_seen.series_id;
 
 history:
 SELECT
@@ -48,23 +55,18 @@ ORDER BY seenAt DESC;
 
 getLatestHistory:
 SELECT
-history.id AS id,
-anime.id AS animeId,
-episode.id AS episodeId,
-anime.user_custom_title AS customTitle,
-anime.remote_title AS title,
-anime.remote_cover AS thumbnailUrl,
-anime.source_id AS sourceId,
-anime.user_favorite_at IS NOT NULL AS favorite,
-anime.state_cover_last_modified AS coverLastModified,
-episode.remote_episode_number AS episodeNumber,
-history.seen_at AS seenAt
-FROM history
-JOIN anime
-ON anime.id = history.anime_id
-JOIN episode
-ON episode.id = history.episode_id
-WHERE history.seen_at IS NOT NULL
-ORDER BY history.seen_at DESC
-
+id,
+animeId,
+episodeId,
+custom_title,
+title,
+thumbnailUrl,
+sourceId,
+favorite,
+coverLastModified,
+episodeNumber,
+seenAt
+FROM historyView
+WHERE historyView.seenAt IS NOT NULL
+ORDER BY seenAt DESC
 LIMIT 1;
