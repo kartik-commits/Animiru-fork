@@ -3516,7 +3516,13 @@ class PlayerViewModel(
 
     private var startingPosition = 0
     fun onDragSeekStart() {
-        startingPosition = mpv.getPropertyInt("time-pos") ?: 0
+        // AM (MEDIA3_DRM_PLAYER) -->
+        startingPosition = if (stateData.value.isMedia3Playback) {
+            (media3Player.currentPositionMs() / 1000L).toInt().coerceAtLeast(0)
+        } else {
+            mpv.getPropertyInt("time-pos") ?: 0
+        }
+        // <-- AM (MEDIA3_DRM_PLAYER)
         updatePlaybackData { it.copy(seekPosition = startingPosition.toFloat()) }
         updateIsSeeking(true)
     }
