@@ -2104,29 +2104,51 @@ class AnimeViewModel(
                     return@lazy processedEpisodes
                 }
 
-                processedEpisodes.insertSeparators { before, after ->
-                    val (lowerEpisode, higherEpisode) = if (anime.sortDescending()) {
-                        after to before
-                    } else {
-                        before to after
-                    }
-                    if (higherEpisode == null) return@insertSeparators null
+                val minEpisodeNumber = processedEpisodes
+                    .map { it.episode.episodeNumber }
+                    .filter { it > 0.0 }
+                    .minOrNull()
 
-                    if (lowerEpisode == null) {
-                        floor(higherEpisode.episode.episodeNumber)
-                            .toInt()
-                            .minus(1)
-                            .coerceAtLeast(0)
-                    } else {
-                        calculateEpisodeGap(higherEpisode.episode, lowerEpisode.episode)
-                    }
-                        .takeIf { it > 0 }
-                        ?.let { missingCount ->
-                            EpisodeList.MissingCount(
-                                id = "${lowerEpisode?.id}-${higherEpisode.id}",
-                                count = missingCount,
-                            )
+                processedEpisodes.insertSeparators { before, after ->
+                    if (before != null && after != null) {
+                        val beforeNum = before.episode.episodeNumber
+                        val afterNum = after.episode.episodeNumber
+                        if (beforeNum > 0.0 && afterNum > 0.0) {
+                            val lower = minOf(beforeNum, afterNum)
+                            val higher = maxOf(beforeNum, afterNum)
+                            calculateEpisodeGap(higher, lower)
+                                .takeIf { it > 0 }
+                                ?.let { missingCount ->
+                                    EpisodeList.MissingCount(
+                                        id = "${before.id}-${after.id}",
+                                        count = missingCount,
+                                    )
+                                }
+                        } else {
+                            null
                         }
+                    } else if (minEpisodeNumber != null && minEpisodeNumber > 1.0) {
+                        val startMissingCount = floor(minEpisodeNumber).toInt() - 1
+                        if (startMissingCount > 0) {
+                            if (before == null && after != null && after.episode.episodeNumber == minEpisodeNumber) {
+                                EpisodeList.MissingCount(
+                                    id = "start-${after.id}",
+                                    count = startMissingCount,
+                                )
+                            } else if (after == null && before != null && before.episode.episodeNumber == minEpisodeNumber) {
+                                EpisodeList.MissingCount(
+                                    id = "start-${before.id}",
+                                    count = startMissingCount,
+                                )
+                            } else {
+                                null
+                            }
+                        } else {
+                            null
+                        }
+                    } else {
+                        null
+                    }
                 }
             }
 
