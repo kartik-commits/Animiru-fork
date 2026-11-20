@@ -16,6 +16,7 @@ import coil3.request.ImageRequest
 import coil3.request.transformations
 import coil3.transform.CircleCropTransformation
 import dev.zacsweers.metro.Inject
+import mihon.app.di.appGraph
 import eu.kanade.presentation.util.formatEpisodeNumber
 import eu.kanade.tachiyomi.R
 import eu.kanade.tachiyomi.animesource.UnmeteredSource
@@ -183,6 +184,15 @@ class LibraryUpdateNotifier(
      * @param updates a list of anime with new updates.
      */
     suspend fun showUpdateNotifications(updates: List<Pair<Anime, Array<Episode>>>) {
+        val displayTitles = if (!securityPreferences.hideNotificationContent.get()) {
+            updates.map { (anime, _) ->
+                val parentTitle = anime.parentId?.let { context.appGraph.getAnime.await(it)?.title }
+                (parentTitle ?: anime.title).chop(NOTIF_TITLE_MAX_LEN)
+            }
+        } else {
+            emptyList()
+        }
+
         // Parent group notification
         context.notify(
             Notifications.ID_NEW_EPISODES,
@@ -190,7 +200,7 @@ class LibraryUpdateNotifier(
         ) {
             setContentTitle(context.stringResource(AYMR.strings.notification_new_episodes))
             if (updates.size == 1 && !securityPreferences.hideNotificationContent.get()) {
-                setContentText(updates.first().first.title.chop(NOTIF_TITLE_MAX_LEN))
+                setContentText(displayTitles.firstOrNull())
             } else {
                 setContentText(
                     context.pluralStringResource(
@@ -203,9 +213,7 @@ class LibraryUpdateNotifier(
                 if (!securityPreferences.hideNotificationContent.get()) {
                     setStyle(
                         NotificationCompat.BigTextStyle().bigText(
-                            updates.joinToString("\n") {
-                                it.first.title.chop(NOTIF_TITLE_MAX_LEN)
-                            },
+                            displayTitles.joinToString("\n"),
                         ),
                     )
                 }
@@ -237,9 +245,11 @@ class LibraryUpdateNotifier(
     }
 
     private suspend fun createNewEpisodesNotification(anime: Anime, episodes: Array<Episode>): Notification {
-        val icon = getAnimeIcon(anime)
+        val parentAnime = anime.parentId?.let { context.appGraph.getAnime.await(it) }
+        val displayAnime = parentAnime ?: anime
+        val icon = getAnimeIcon(displayAnime)
         return context.notificationBuilder(Notifications.CHANNEL_NEW_EPISODES) {
-            setContentTitle(anime.title)
+            setContentTitle(displayAnime.title)
 
             val description = getNewEpisodesDescription(episodes)
             setContentText(description)
@@ -276,7 +286,7 @@ class LibraryUpdateNotifier(
                 context.stringResource(AYMR.strings.action_view_episodes),
                 NotificationReceiver.openEpisodePendingActivity(
                     context,
-                    anime,
+                    displayAnime,
                     Notifications.ID_NEW_EPISODES,
                 ),
             )

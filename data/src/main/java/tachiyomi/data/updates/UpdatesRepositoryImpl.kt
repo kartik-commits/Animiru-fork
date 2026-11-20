@@ -109,6 +109,7 @@ class UpdatesRepositoryImpl(
         dateUpload: Instant?,
         dateFetch: Instant,
         excludedScanlator: String?,
+        parentId: Long?,
     ): UpdatesWithRelations = UpdatesWithRelations(
         animeId = animeId,
         // AM (CUSTOM_INFORMATION) -->
@@ -134,11 +135,12 @@ class UpdatesRepositoryImpl(
         // <-- AM
         dateFetch = dateFetch,
         coverData = AnimeCover(
-            animeId = animeId,
+            animeId = parentId ?: animeId,
             sourceId = sourceId,
             isAnimeFavorite = favorite,
             url = thumbnailUrl,
             lastModified = coverLastModified,
         ),
+        parentId = parentId,
     )
 }

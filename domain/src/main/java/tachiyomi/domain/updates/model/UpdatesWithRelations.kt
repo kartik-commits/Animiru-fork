@@ -28,6 +28,7 @@ data class UpdatesWithRelations(
     // <-- AM
     val dateFetch: Instant,
     val coverData: AnimeCover,
+    val parentId: Long? = null,
 ) {
     // AM (CUSTOM_INFORMATION) -->
     val animeTitle: String = customAnimeTitle ?: ogAnimeTitle

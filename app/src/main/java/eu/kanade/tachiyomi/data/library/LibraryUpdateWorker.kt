@@ -458,7 +458,8 @@ class LibraryUpdateWorker(private val context: Context, workerParams: WorkerPara
         )
             .getOrThrow()
 
-        return if (update.anime.favorite) update.newEpisodes else emptyList()
+        val isFavorite = update.anime.favorite || (update.anime.parentId != null)
+        return if (isFavorite) update.newEpisodes else emptyList()
     }
 
     private suspend fun withUpdateNotification(

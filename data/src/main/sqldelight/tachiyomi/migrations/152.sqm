@@ -1,0 +1,41 @@
+DROP VIEW updatesView;
+
+CREATE VIEW updatesView AS
+SELECT
+    anime.id AS animeId,
+    -- AM -->
+    coalesce(parent.user_custom_title, anime.user_custom_title) AS customAnimeTitle,
+    -- <-- AM
+    coalesce(parent.remote_title, anime.remote_title) AS animeTitle,
+    episode.id AS episodeId,
+    episode.remote_name AS episodeName,
+    episode.remote_scanlator AS scanlator,
+    episode.remote_url AS episodeUrl,
+    episode.user_seen AS seen,
+    episode.user_bookmark AS bookmark,
+    -- AY -->
+    episode.remote_fillermark AS fillermark,
+    -- <-- AY
+    episode.user_last_second_seen AS lastSecondSeen,
+    -- AY -->
+    episode.state_total_seconds AS totalSeconds,
+    -- <-- AY
+    coalesce(parent.source_id, anime.source_id) AS sourceId,
+    (coalesce(parent.user_favorite_at, anime.user_favorite_at) IS NOT NULL) AS favorite,
+    coalesce(nullif(anime.remote_cover, ''), parent.remote_cover) AS thumbnailUrl,
+    coalesce(parent.state_cover_last_modified, anime.state_cover_last_modified) AS coverLastModified,
+    episode.remote_date_upload AS dateUpload,
+    episode.state_date_fetch AS dateFetch,
+    excluded_scanlator.scanlator AS excludedScanlator,
+    parent.id AS parentId
+FROM anime
+LEFT JOIN anime AS parent
+ON anime.state_parent_id = parent.id
+JOIN episode
+ON anime.id = episode.anime_id
+LEFT JOIN excluded_scanlator
+ON anime.id = excluded_scanlator.anime_id
+AND episode.remote_scanlator = excluded_scanlator.scanlator
+WHERE coalesce(parent.user_favorite_at, anime.user_favorite_at) IS NOT NULL
+AND episode.state_date_fetch > coalesce(parent.user_favorite_at, anime.user_favorite_at)
+ORDER BY episode.state_date_fetch DESC;

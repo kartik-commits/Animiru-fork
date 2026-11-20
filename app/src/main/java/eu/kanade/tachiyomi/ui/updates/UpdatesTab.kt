@@ -86,7 +86,7 @@ data object UpdatesTab : Tab {
             state = state,
             snackbarHostState = viewModel.snackbarHostState,
             lastUpdated = viewModel.lastUpdated,
-            onClickCover = { item -> navigator.push(AnimeScreen(item.update.animeId)) },
+            onClickCover = { item -> navigator.push(AnimeScreen(item.update.parentId ?: item.update.animeId)) },
             onSelectAll = viewModel::toggleAllSelection,
             onInvertSelection = viewModel::invertSelection,
             onUpdateLibrary = viewModel::updateLibrary,

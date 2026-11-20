@@ -4,9 +4,9 @@ CREATE VIEW updatesView AS
 SELECT
     anime.id AS animeId,
     -- AM -->
-    anime.user_custom_title AS customAnimeTitle,
+    coalesce(parent.user_custom_title, anime.user_custom_title) AS customAnimeTitle,
     -- <-- AM
-    anime.remote_title AS animeTitle,
+    coalesce(parent.remote_title, anime.remote_title) AS animeTitle,
     episode.id AS episodeId,
     episode.remote_name AS episodeName,
     episode.remote_scanlator AS scanlator,
@@ -20,27 +20,31 @@ SELECT
     -- AY -->
     episode.state_total_seconds AS totalSeconds,
     -- <-- AY
-    anime.source_id AS sourceId,
-    anime.user_favorite_at IS NOT NULL AS favorite,
-    anime.remote_cover AS thumbnailUrl,
-    anime.state_cover_last_modified AS coverLastModified,
+    coalesce(parent.source_id, anime.source_id) AS sourceId,
+    (coalesce(parent.user_favorite_at, anime.user_favorite_at) IS NOT NULL) AS favorite,
+    coalesce(nullif(anime.remote_cover, ''), parent.remote_cover) AS thumbnailUrl,
+    coalesce(parent.state_cover_last_modified, anime.state_cover_last_modified) AS coverLastModified,
     episode.remote_date_upload AS dateUpload,
     episode.state_date_fetch AS dateFetch,
-    excluded_scanlator.scanlator AS excludedScanlator
-FROM anime JOIN episode
+    excluded_scanlator.scanlator AS excludedScanlator,
+    parent.id AS parentId
+FROM anime
+LEFT JOIN anime AS parent
+ON anime.state_parent_id = parent.id
+JOIN episode
 ON anime.id = episode.anime_id
 LEFT JOIN excluded_scanlator
 ON anime.id = excluded_scanlator.anime_id
 AND episode.remote_scanlator = excluded_scanlator.scanlator
-WHERE user_favorite_at IS NOT NULL
-AND state_date_fetch > user_favorite_at
-ORDER BY state_date_fetch DESC;
+WHERE coalesce(parent.user_favorite_at, anime.user_favorite_at) IS NOT NULL
+AND episode.state_date_fetch > coalesce(parent.user_favorite_at, anime.user_favorite_at)
+ORDER BY episode.state_date_fetch DESC;
 
 getRecentUpdatesWithFilters:
 SELECT
     animeId, customAnimeTitle, animeTitle, episodeId, episodeName, scanlator, episodeUrl, seen,
     bookmark, fillermark, lastSecondSeen, totalSeconds, sourceId, favorite, thumbnailUrl,
-    coverLastModified, dateUpload, dateFetch, excludedScanlator
+    coverLastModified, dateUpload, dateFetch, excludedScanlator, parentId
 FROM updatesView
 WHERE dateUpload > :after
 AND (:seen IS NULL OR seen = :seen)
@@ -58,11 +62,11 @@ AND (
     :includedEmpty
     OR EXISTS (
         SELECT 1 FROM anime_category
-        WHERE anime_category.anime_id = animeId
+        WHERE anime_category.anime_id = coalesce(parentId, animeId)
         AND anime_category.category_id IN :includedCategories
     )
     OR (0 IN :includedCategories AND NOT EXISTS (
-        SELECT 1 FROM anime_category WHERE anime_category.anime_id = animeId)
+        SELECT 1 FROM anime_category WHERE anime_category.anime_id = coalesce(parentId, animeId))
     )
 )
 AND (
@@ -71,12 +75,12 @@ AND (
     OR (
         NOT EXISTS (
             SELECT 1 FROM anime_category
-            WHERE anime_category.anime_id = animeId
+            WHERE anime_category.anime_id = coalesce(parentId, animeId)
             AND anime_category.category_id IN :excludedCategories
         )
         AND (
             0 NOT IN :excludedCategories
-            OR EXISTS (SELECT 1 FROM anime_category WHERE anime_category.anime_id = animeId)
+            OR EXISTS (SELECT 1 FROM anime_category WHERE anime_category.anime_id = coalesce(parentId, animeId))
         )
     )
 )
@@ -87,7 +91,7 @@ getSeenUpdates:
 SELECT
     animeId, customAnimeTitle, animeTitle, episodeId, episodeName, scanlator, episodeUrl, seen,
     bookmark, fillermark, lastSecondSeen, totalSeconds, sourceId, favorite, thumbnailUrl,
-    coverLastModified, dateUpload, dateFetch, excludedScanlator
+    coverLastModified, dateUpload, dateFetch, excludedScanlator, parentId
 FROM updatesView
 WHERE seen = 1
 AND dateUpload > :after
@@ -98,7 +102,7 @@ getUnseenUpdates:
 SELECT
     animeId, customAnimeTitle, animeTitle, episodeId, episodeName, scanlator, episodeUrl, seen,
     bookmark, fillermark, lastSecondSeen, totalSeconds, sourceId, favorite, thumbnailUrl,
-    coverLastModified, dateUpload, dateFetch, excludedScanlator
+    coverLastModified, dateUpload, dateFetch, excludedScanlator, parentId
 FROM updatesView
 WHERE seen = 0
 AND dateUpload > :after
