@@ -1141,7 +1141,10 @@ class PlayerViewModel(
                 withContext(Dispatchers.IO) {
                     try {
                         withTimeoutOrNull(3000L) {
-                            val isFullyWatchedMethod = source.javaClass.getMethod("isEpisodeFullyWatched", String::class.java)
+                            val isFullyWatchedMethod = source.javaClass.getMethod(
+                                "isEpisodeFullyWatched",
+                                String::class.java,
+                            )
                             val fullyWatched = isFullyWatchedMethod.invoke(source, episode.url) as? Boolean
                             if (fullyWatched == true) {
                                 effectiveEpisode = effectiveEpisode.copy(seen = true)
@@ -1155,7 +1158,11 @@ class PlayerViewModel(
                                     if (posMs > effectiveEpisode.lastSecondSeen) {
                                         effectiveEpisode = effectiveEpisode.copy(lastSecondSeen = posMs)
                                         updateEpisode(effectiveEpisode.id) { it.copy(lastSecondSeen = posMs) }
-                                        updateEpisode.await(EpisodeUpdate(effectiveEpisode.id) { lastSecondSeen = posMs })
+                                        updateEpisode.await(
+                                            EpisodeUpdate(effectiveEpisode.id) {
+                                                lastSecondSeen = posMs
+                                            },
+                                        )
                                     }
                                 }
                             }
@@ -1768,7 +1775,9 @@ class PlayerViewModel(
         if (isSameMedia3Stream && currentVid != null) {
             val dubSuffix = if (currentVid.videoTitle.contains(" [")) {
                 " [" + currentVid.videoTitle.substringAfterLast(" [")
-            } else ""
+            } else {
+                ""
+            }
             val newTitle = video.videoTitle.replace(Regex("""\[.*?\]"""), "").trim() + dubSuffix
             val resolvedVideo = currentVid.copy(
                 resolution = video.resolution,
@@ -1891,7 +1900,9 @@ class PlayerViewModel(
         } else {
             emptyList()
         }
-        val rawSubs = video.subtitleTracks.filter { it.lang != "none" && it.url.isNotBlank() }.mapIndexed { index, track ->
+        val rawSubs = video.subtitleTracks.filter {
+            it.lang != "none" && it.url.isNotBlank()
+        }.mapIndexed { index, track ->
             val isDefault = track.lang.startsWith("en", ignoreCase = true)
             Media3PlayerTrack(
                 trackType = androidx.media3.common.C.TRACK_TYPE_TEXT,
@@ -4502,7 +4513,9 @@ class PlayerViewModel(
             }
         }
 
-        logcat(LogPriority.DEBUG) { "AniSkip: No skip times found for anime $animeId (title: $title, ep: $episodeNumber)" }
+        logcat(LogPriority.DEBUG) {
+            "AniSkip: No skip times found for anime $animeId (title: $title, ep: $episodeNumber)"
+        }
         return null
     }
 

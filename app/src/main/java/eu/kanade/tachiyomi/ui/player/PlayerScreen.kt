@@ -36,8 +36,8 @@ import animiru.domain.player.model.Debanding
 import animiru.domain.player.model.Decoder.Companion.getDecoderFromValue
 import animiru.domain.player.model.SubtitleJustification
 import animiru.domain.player.model.SubtitlesBorderStyle
-import animiru.domain.player.service.SubtitleAssOverride
 import animiru.domain.player.model.VideoFilters
+import animiru.domain.player.service.SubtitleAssOverride
 import cafe.adriel.voyager.core.annotation.InternalVoyagerApi
 import eu.kanade.presentation.theme.playerRippleConfiguration
 import eu.kanade.tachiyomi.ui.player.PlayerViewModel.PlayerEvent
@@ -373,7 +373,7 @@ fun PlayerScreen(
                 LocalPlayerButtonsClickEvent provides { resetControls = !resetControls },
                 LocalContentColor provides Color.White,
             ) {
-            // <-- AM (MEDIA3_DRM_PLAYER)
+                // <-- AM (MEDIA3_DRM_PLAYER)
                 PlayerControls(
                     isLandscape = isLandscape,
                     stateData = stateData,

@@ -43,14 +43,17 @@ class TrackEpisode(
                         tracks = parentTracks
                         try {
                             val seasons = getAnimeSeasonsByParentId.await(parentId)
-                            val currentSeasonOrder = anime.seasonNumber.takeIf { it >= 0 } ?: anime.seasonSourceOrder.toDouble()
+                            val currentSeasonOrder =
+                                anime.seasonNumber.takeIf { it >= 0 } ?: anime.seasonSourceOrder.toDouble()
                             val priorSeasons = seasons.filter {
                                 val order = it.anime.seasonNumber.takeIf { s -> s >= 0 }
                                     ?: it.anime.seasonSourceOrder.toDouble()
                                 order < currentSeasonOrder
                             }
                             val priorEpCount = priorSeasons.sumOf { getEpisodesByAnimeId.await(it.anime.id).size }
-                            if (priorEpCount > 0 && parentTracks.any { it.totalEpisodes == 0L || it.totalEpisodes > episodeNumber }) {
+                            if (priorEpCount > 0 &&
+                                parentTracks.any { it.totalEpisodes == 0L || it.totalEpisodes > episodeNumber }
+                            ) {
                                 targetEpisodeNumber = priorEpCount + episodeNumber
                             }
                         } catch (e: Exception) {

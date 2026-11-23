@@ -519,7 +519,9 @@ class AnimeViewModel(
                 if (localEpisodes.isEmpty()) {
                     try {
                         val state = successState
-                        val source = state?.source ?: sourceManager.getOrStub(getAnimeAndEpisodesAndSeasons.awaitAnime(animeId).source)
+                        val source =
+                            state?.source
+                                ?: sourceManager.getOrStub(getAnimeAndEpisodesAndSeasons.awaitAnime(animeId).source)
                         val seasonAnime = getAnimeAndEpisodesAndSeasons.awaitAnime(seasonId)
                         if (seasonAnime.fetchType == FetchType.Episodes) {
                             updateAnimeFromRemote.awaitEpisodesUpdate(
@@ -544,7 +546,9 @@ class AnimeViewModel(
             if (localEpisodes.isEmpty()) {
                 try {
                     val state = successState
-                    val source = state?.source ?: sourceManager.getOrStub(getAnimeAndEpisodesAndSeasons.awaitAnime(animeId).source)
+                    val source =
+                        state?.source
+                            ?: sourceManager.getOrStub(getAnimeAndEpisodesAndSeasons.awaitAnime(animeId).source)
                     val seasonAnime = getAnimeAndEpisodesAndSeasons.awaitAnime(seasonId)
                     if (seasonAnime.fetchType == FetchType.Episodes) {
                         updateAnimeFromRemote.awaitEpisodesUpdate(
@@ -2135,7 +2139,9 @@ class AnimeViewModel(
                                     id = "start-${after.id}",
                                     count = startMissingCount,
                                 )
-                            } else if (after == null && before != null && before.episode.episodeNumber == minEpisodeNumber) {
+                            } else if (after == null && before != null &&
+                                before.episode.episodeNumber == minEpisodeNumber
+                            ) {
                                 EpisodeList.MissingCount(
                                     id = "start-${before.id}",
                                     count = startMissingCount,
