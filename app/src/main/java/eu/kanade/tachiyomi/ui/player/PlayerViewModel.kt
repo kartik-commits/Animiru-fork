@@ -1134,14 +1134,49 @@ class PlayerViewModel(
     private suspend fun setupEpisode(episode: Episode) {
         val currentState = stateData.value
 
-        val currentEpisodeIndex = currentState.currentPlaylist.indexOfFirst {
-            episode.id == it.id
+        var effectiveEpisode = episode
+        if (!effectiveEpisode.seen && !currentState.incognitoMode) {
+            val source = currentState.currentSource
+            if (source != null) {
+                withContext(Dispatchers.IO) {
+                    try {
+                        withTimeoutOrNull(3000L) {
+                            val isFullyWatchedMethod = source.javaClass.getMethod("isEpisodeFullyWatched", String::class.java)
+                            val fullyWatched = isFullyWatchedMethod.invoke(source, episode.url) as? Boolean
+                            if (fullyWatched == true) {
+                                effectiveEpisode = effectiveEpisode.copy(seen = true)
+                                updateEpisode(effectiveEpisode.id) { it.copy(seen = true) }
+                                updateEpisode.await(EpisodeUpdate(effectiveEpisode.id) { seen = true })
+                            } else {
+                                val getPlayheadMethod = source.javaClass.getMethod("getPlayhead", String::class.java)
+                                val remotePosSeconds = getPlayheadMethod.invoke(source, episode.url) as? Long
+                                if (remotePosSeconds != null && remotePosSeconds > 0) {
+                                    val posMs = (remotePosSeconds * 1000).toInt()
+                                    if (posMs > effectiveEpisode.lastSecondSeen) {
+                                        effectiveEpisode = effectiveEpisode.copy(lastSecondSeen = posMs)
+                                        updateEpisode(effectiveEpisode.id) { it.copy(lastSecondSeen = posMs) }
+                                        updateEpisode.await(EpisodeUpdate(effectiveEpisode.id) { lastSecondSeen = posMs })
+                                    }
+                                }
+                            }
+                        }
+                    } catch (_: NoSuchMethodException) {
+                        // Source doesn't implement remote playheads
+                    } catch (e: Throwable) {
+                        logcat(LogPriority.WARN, e) { "Failed to pull remote playhead from source" }
+                    }
+                }
+            }
         }
-        val isEpisodeOnline = isEpisodeOnline(episode)
+
+        val currentEpisodeIndex = currentState.currentPlaylist.indexOfFirst {
+            effectiveEpisode.id == it.id
+        }
+        val isEpisodeOnline = isEpisodeOnline(effectiveEpisode)
 
         updateStateData {
             it.copy(
-                currentEpisode = episode,
+                currentEpisode = effectiveEpisode,
                 currentPlaylistIndex = currentEpisodeIndex,
                 isEpisodeOnline = isEpisodeOnline == true,
                 hasPreviousEpisode = currentEpisodeIndex != 0,
@@ -1150,10 +1185,10 @@ class PlayerViewModel(
         }
 
         updateUiData {
-            it.copy(mediaTitle = episode.name)
+            it.copy(mediaTitle = effectiveEpisode.name)
         }
 
-        setPropertyDouble("user-data/current-anime/episode-number", episode.episodeNumber)
+        setPropertyDouble("user-data/current-anime/episode-number", effectiveEpisode.episodeNumber)
     }
 
     fun setupPlayerOrientation() {
@@ -3777,6 +3812,7 @@ class PlayerViewModel(
     override fun onCleared() {
         stateData.value.currentEpisode?.let {
             updateEpisodeProgress(it)
+            saveEpisodeProgress()
             episodeToDownload?.let { toDownload ->
                 // viewModelScope is already cancelled here
                 appScope.launch { downloadManager.addDownloadsToStartOfQueue(listOf(toDownload)) }
@@ -3915,6 +3951,30 @@ class PlayerViewModel(
                 totalSeconds = episode.totalSeconds,
             )
         }
+
+        val source = stateData.value.currentSource
+        if (source != null && !stateData.value.incognitoMode) {
+            val shouldSync = !onComplete || !hasUpdatedSeen.get()
+            if (shouldSync) {
+                try {
+                    val savePlayheadMethod = source.javaClass.getMethod(
+                        "savePlayhead",
+                        String::class.java,
+                        java.lang.Long.TYPE,
+                        java.lang.Long.TYPE,
+                        java.lang.Boolean.TYPE,
+                    )
+                    val posSec = (episode.lastSecondSeen / 1000L).coerceAtLeast(0L)
+                    val totalSec = (episode.totalSeconds / 1000L).coerceAtLeast(0L)
+                    savePlayheadMethod.invoke(source, episode.url, posSec, totalSec, onComplete)
+                } catch (_: NoSuchMethodException) {
+                    // Source does not implement savePlayhead
+                } catch (e: Throwable) {
+                    logcat(LogPriority.WARN, e) { "Failed to sync playhead to source" }
+                }
+            }
+        }
+
         // Immediate and through the mutex, which is fair, so the writes land in the order they were made
         appScope.launch(Dispatchers.Main.immediate) {
             progressWrites.withLock {

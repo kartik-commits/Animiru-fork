@@ -10,6 +10,7 @@ import tachiyomi.domain.download.service.DownloadPreferences
 import tachiyomi.domain.episode.model.Episode
 import tachiyomi.domain.episode.model.EpisodeUpdate
 import tachiyomi.domain.episode.repository.EpisodeRepository
+import tachiyomi.domain.source.service.SourceManager
 
 @Inject
 class SetSeenStatus(
@@ -17,6 +18,7 @@ class SetSeenStatus(
     private val deleteDownload: DeleteDownload,
     private val animeRepository: AnimeRepository,
     private val episodeRepository: EpisodeRepository,
+    private val sourceManager: SourceManager,
 ) {
 
     private val mapper = { episode: Episode, seen: Boolean ->
@@ -59,6 +61,43 @@ class SetSeenStatus(
                     )
                 }
         }
+
+        // AM --> Sync seen/unseen state to source
+        episodesToUpdate.groupBy { it.animeId }.forEach { (animeId, episodes) ->
+            runCatching {
+                val anime = animeRepository.getAnimeById(animeId) ?: return@forEach
+                val source = sourceManager.getOrStub(anime.source)
+                try {
+                    val batchMethod = source.javaClass.getMethod(
+                        "setEpisodesSeen",
+                        List::class.java,
+                        java.lang.Boolean.TYPE,
+                    )
+                    batchMethod.invoke(source, episodes.map { it.url }, seen)
+                } catch (_: NoSuchMethodException) {
+                    for (ep in episodes) {
+                        try {
+                            if (seen) {
+                                val markMethod = source.javaClass.getMethod(
+                                    "savePlayhead",
+                                    String::class.java,
+                                    java.lang.Long.TYPE,
+                                    java.lang.Long.TYPE,
+                                    java.lang.Boolean.TYPE,
+                                )
+                                markMethod.invoke(source, ep.url, 0L, 0L, true)
+                            } else {
+                                val deleteMethod = source.javaClass.getMethod("deletePlayhead", String::class.java)
+                                deleteMethod.invoke(source, ep.url)
+                            }
+                        } catch (_: NoSuchMethodException) {
+                            // Source does not support playhead sync
+                        }
+                    }
+                }
+            }
+        }
+        // <-- AM
 
         return Result.Success
     }

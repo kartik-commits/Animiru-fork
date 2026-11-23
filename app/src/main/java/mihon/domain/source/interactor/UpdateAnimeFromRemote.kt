@@ -16,6 +16,9 @@ import eu.kanade.tachiyomi.data.cache.CoverCache
 import eu.kanade.tachiyomi.data.download.DownloadManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.json.booleanOrNull
+import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.longOrNull
 import logcat.LogPriority
 import mihon.domain.source.interactor.models.RemoteAnimeEpisodeUpdate
 import mihon.domain.source.interactor.models.RemoteAnimeSeasonUpdate
@@ -25,6 +28,7 @@ import tachiyomi.domain.anime.model.Anime
 import tachiyomi.domain.anime.model.AnimeRemoteUpdate
 import tachiyomi.domain.anime.repository.AnimeRepository
 import tachiyomi.domain.episode.model.Episode
+import tachiyomi.domain.episode.model.EpisodeUpdate
 import tachiyomi.domain.episode.repository.EpisodeRepository
 import tachiyomi.domain.source.service.SourceManager
 import tachiyomi.source.local.isLocal
@@ -120,6 +124,36 @@ class UpdateAnimeFromRemote(
                 manualFetch = manualFetch,
                 fetchWindow = fetchWindow,
             )
+
+            // AM --> Sync playheads & watched status from episode memo if present
+            runCatching {
+                val allEpisodes = episodeRepository.getEpisodeByAnimeId(anime.id)
+                val updatesToApply = mutableListOf<EpisodeUpdate>()
+                for (sourceEp in sourceEpisodes) {
+                    val dbEp = allEpisodes.find { it.url == sourceEp.url } ?: continue
+                    val crPlayhead = sourceEp.memo["cr_playhead"]?.jsonPrimitive?.longOrNull
+                    val crFullyWatched = sourceEp.memo["cr_fully_watched"]?.jsonPrimitive?.booleanOrNull
+                    if (crFullyWatched == true && !dbEp.seen) {
+                        updatesToApply.add(
+                            EpisodeUpdate(dbEp.id) {
+                                seen = true
+                                crPlayhead?.let { lastSecondSeen = (it * 1000).toInt() }
+                            },
+                        )
+                    } else if (crPlayhead != null && (crPlayhead * 1000).toInt() > dbEp.lastSecondSeen && !dbEp.seen) {
+                        updatesToApply.add(
+                            EpisodeUpdate(dbEp.id) {
+                                lastSecondSeen = (crPlayhead * 1000).toInt()
+                            },
+                        )
+                    }
+                }
+                if (updatesToApply.isNotEmpty()) {
+                    episodeRepository.updateAll(updatesToApply)
+                }
+            }
+            // <-- AM
+
             val updatedAnime = animeRepository.getAnimeById(anime.id)
             Result.success(RemoteAnimeEpisodeUpdate(anime = updatedAnime, newEpisodes = newEpisodes))
         } catch (e: Exception) {
