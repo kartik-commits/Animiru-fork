@@ -1993,17 +1993,7 @@ class PlayerViewModel(
         val currentPos = (media3Player.currentPositionMs() / 1000L).coerceAtLeast(0L)
         val source = stateData.value.currentSource ?: return
         val baseEpUrl = stateData.value.currentEpisode?.url ?: currentVideo.videoUrl
-
-        val newUrl = try {
-            val regex = Regex(""""versionGuid"\s*:\s*("[^"]*"|null)""")
-            if (baseEpUrl.contains("versionGuid")) {
-                baseEpUrl.replace(regex, """"versionGuid":"$versionGuid"""")
-            } else {
-                baseEpUrl
-            }
-        } catch (_: Exception) {
-            baseEpUrl
-        }
+        val newUrl = Media3PlaybackUtils.withUpdatedVersionGuid(baseEpUrl, versionGuid)
 
         val cleanTitle = Media3PlaybackUtils.stripBracketSuffixes(currentVideo.videoTitle)
         val newVideo = currentVideo.copy(
@@ -2021,7 +2011,7 @@ class PlayerViewModel(
                 val resolved = hosterLoader.getResolvedVideo(source, newVideo)
                 if (resolved != null && resolved.drm != null && resolved.initialized) {
                     withContext(Dispatchers.Main) {
-                        updateStateData { it.copy(currentVideo = resolved) }
+                        updateCurrentMedia3VideoState(resolved)
                         setMedia3Video(resolved, currentPos)
                         dismissSheet()
                     }
@@ -2328,11 +2318,7 @@ class PlayerViewModel(
                 ),
             )
             if (updatedVideo != null) {
-                updateHosterStateAt(
-                    index = hosterIndex,
-                    state = hosterState.getChangedAt(videoIndex, updatedVideo, Video.State.READY),
-                )
-                updateStateData { it.copy(currentVideo = updatedVideo) }
+                updateCurrentMedia3VideoState(updatedVideo, hosterIndex, videoIndex)
             }
             if (uiData.value.sheetShown == Sheets.QualityTracks ||
                 castUiData.value.sheetShown == CastSheet.Quality
@@ -2395,6 +2381,31 @@ class PlayerViewModel(
         updateStateData {
             it.copy(
                 hosterState = getHosterStateAt(it.hosterState, index, state),
+            )
+        }
+    }
+
+    private fun updateCurrentMedia3VideoState(
+        video: Video,
+        hosterIndex: Int = qualityIndex.first,
+        videoIndex: Int = qualityIndex.second,
+    ) {
+        updateStateData { state ->
+            val currentHosterState = state.hosterState.getOrNull(hosterIndex) as? HosterState.Ready
+            val updatedHosterState = if (currentHosterState != null &&
+                videoIndex in currentHosterState.videoList.indices
+            ) {
+                getHosterStateAt(
+                    hosters = state.hosterState,
+                    index = hosterIndex,
+                    state = currentHosterState.getChangedAt(videoIndex, video, Video.State.READY),
+                )
+            } else {
+                state.hosterState
+            }
+            state.copy(
+                currentVideo = video,
+                hosterState = updatedHosterState,
             )
         }
     }
