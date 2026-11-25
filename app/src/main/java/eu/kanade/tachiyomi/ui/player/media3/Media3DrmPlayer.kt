@@ -55,6 +55,7 @@ class Media3DrmPlayer(
         startPositionSeconds: Long,
         preferredSubtitleLang: String? = null,
         subtitlesDisabled: Boolean = false,
+        autoPlay: Boolean = true,
     ) {
         val drm = video.drm ?: return
         require(video.videoUrl.startsWith("https://")) { "Protected media URL must use HTTPS" }
@@ -171,7 +172,7 @@ class Media3DrmPlayer(
             engine.trackSelectionParameters = params.build()
 
             engine.prepare()
-            engine.play()
+            engine.playWhenReady = autoPlay
         }
     }
 

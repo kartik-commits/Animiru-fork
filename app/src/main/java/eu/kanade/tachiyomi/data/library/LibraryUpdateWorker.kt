@@ -251,12 +251,32 @@ class LibraryUpdateWorker(private val context: Context, workerParams: WorkerPara
         }
         // <-- AM (GROUPING)
 
+        val restrictions = libraryPreferences.autoUpdateAnimeRestrictions.get()
         // AY -->
         val includeSeasons = libraryPreferences.updateSeasonOnLibraryUpdate.get()
+        val autoUpdateMetadata = libraryPreferences.autoUpdateMetadata.get()
         val lastToUpdateWithSeasons = listToUpdate.flatMap { libAnime ->
             when (libAnime.anime.fetchType) {
                 FetchType.Seasons -> {
                     if (includeSeasons) {
+                        val skipCompletedParent =
+                            ANIME_NON_COMPLETED in restrictions && libAnime.anime.status.toInt() == SAnime.COMPLETED
+                        if (libAnime.anime.updateStrategy != AnimeUpdateStrategy.ONLY_FETCH_ONCE &&
+                            !skipCompletedParent
+                        ) {
+                            try {
+                                updateAnimeFromRemote.awaitSeasonsUpdate(
+                                    anime = libAnime.anime,
+                                    fetchDetails = autoUpdateMetadata,
+                                    fetchSeasons = true,
+                                )
+                            } catch (e: Exception) {
+                                if (e is CancellationException) throw e
+                                logcat(LogPriority.WARN, e) {
+                                    "Failed to refresh seasons for ${libAnime.anime.title}"
+                                }
+                            }
+                        }
                         val seasons = getAnimeSeasonsByParentId.await(libAnime.anime.id)
                         seasons
                             .filter { s ->
@@ -272,7 +292,6 @@ class LibraryUpdateWorker(private val context: Context, workerParams: WorkerPara
         }
         // <-- AY
 
-        val restrictions = libraryPreferences.autoUpdateAnimeRestrictions.get()
         val skippedUpdates = mutableListOf<Pair<Anime, String?>>()
         val timeZone = TimeZone.currentSystemDefault()
         val fetchWindowUpperBound = fetchInterval.getWindow(

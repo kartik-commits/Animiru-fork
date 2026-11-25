@@ -9,7 +9,11 @@ import eu.kanade.tachiyomi.network.jsonMime
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.longOrNull
 import kotlinx.serialization.json.put
 import okhttp3.OkHttpClient
 import okhttp3.RequestBody.Companion.toRequestBody
@@ -49,6 +53,7 @@ class AniSkipApi(private val json: Json) {
     // AM (ANISKIP) -->
     fun getMalIdFromTitle(title: String): Long? {
         val cleanTitle = title.replace(Regex("""\s*[\(\[].*?[\)\]]"""), "").trim()
+        if (cleanTitle.isBlank()) return null
         val query = """
             query (${'$'}search: String) {
                 Media (search: ${'$'}search, type: ANIME) {
@@ -56,24 +61,7 @@ class AniSkipApi(private val json: Json) {
                 }
             }
         """.trimIndent()
-        val body = buildJsonObject {
-            put("query", query)
-            put("variables", buildJsonObject { put("search", cleanTitle) })
-        }.toString()
-
-        return try {
-            val response = client.newCall(
-                POST(
-                    "https://graphql.anilist.co",
-                    body = body.toRequestBody(jsonMime),
-                ),
-            ).execute()
-            val text = response.body.string()
-            val idMal = text.substringAfter("idMal\":").substringBefore(",").substringBefore("}").trim().toLongOrNull()
-            if (idMal != null && idMal > 0) idMal else null
-        } catch (_: Exception) {
-            null
-        }
+        return fetchMalIdFromAniList(query, buildJsonObject { put("search", cleanTitle) })
     }
     // <-- AM (ANISKIP)
 
@@ -83,19 +71,44 @@ class AniSkipApi(private val json: Json) {
                 Media(id:$id){idMal}
                 }
         """.trimMargin()
-        val response = try {
+        return fetchMalIdFromAniList(query) ?: 0L
+    }
+
+    private fun fetchMalIdFromAniList(query: String, variables: JsonObject? = null): Long? {
+        val body = buildJsonObject {
+            put("query", query)
+            if (variables != null) put("variables", variables)
+        }.toString()
+
+        return try {
             client.newCall(
                 POST(
                     "https://graphql.anilist.co",
-                    body = buildJsonObject { put("query", query) }.toString()
-                        .toRequestBody(jsonMime),
+                    body = body.toRequestBody(jsonMime),
                 ),
-            ).execute()
+            ).execute().use { response ->
+                if (!response.isSuccessful) return null
+                parseAniListMalId(json, response.body.string())
+            }
         } catch (_: Exception) {
-            return 0
+            null
         }
-        return response.body.string().substringAfter("idMal\":").substringBefore("}")
-            .toLongOrNull() ?: 0
+    }
+
+    companion object {
+        internal fun parseAniListMalId(json: Json, responseBody: String): Long? = try {
+            val root = json.parseToJsonElement(responseBody).jsonObject
+            root["data"]
+                ?.jsonObject
+                ?.get("Media")
+                ?.jsonObject
+                ?.get("idMal")
+                ?.jsonPrimitive
+                ?.longOrNull
+                ?.takeIf { it > 0L }
+        } catch (_: Exception) {
+            null
+        }
     }
 }
 

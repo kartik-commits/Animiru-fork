@@ -166,6 +166,7 @@ import tachiyomi.domain.library.service.LibraryPreferences
 import tachiyomi.domain.source.service.SourceManager
 import tachiyomi.domain.storage.service.StorageManager
 import tachiyomi.domain.track.interactor.GetTracks
+import tachiyomi.domain.track.model.Track
 import tachiyomi.i18n.animiru.AMMR
 import tachiyomi.i18n.aniyomi.AYMR
 import tachiyomi.source.local.image.LocalBackgroundManager
@@ -1837,7 +1838,12 @@ class PlayerViewModel(
     }
 
     // AM (MEDIA3_DRM_PLAYER) -->
-    private fun setMedia3Video(video: Video, restoredPositionSeconds: Long? = null) {
+    private fun setMedia3Video(
+        video: Video,
+        restoredPositionSeconds: Long? = null,
+        autoPlay: Boolean = true,
+    ) {
+        isMedia3Suspended = false
         stopHttpServer()
         if (stateData.value.isCasting || castManager.castState.value.isConnected) {
             castManager.disconnect()
@@ -1912,11 +1918,15 @@ class PlayerViewModel(
         } ?: 0L
         media3ProgressJob?.cancel()
         try {
+            if (!autoPlay) {
+                updatePlaybackData { it.copy(paused = true) }
+            }
             media3Player.load(
                 video = video,
                 startPositionSeconds = startPosition,
                 preferredSubtitleLang = selectedSub?.language,
                 subtitlesDisabled = selectedSub == null,
+                autoPlay = autoPlay,
             )
             media3ProgressJob = viewModelScope.launch {
                 while (stateData.value.isMedia3Playback) {
@@ -1935,6 +1945,8 @@ class PlayerViewModel(
 
     private var media3AniSkipAttemptedEpisodeId: Long? = null
     private var media3PreferredSubtitleLang: String? = null
+    private var isMedia3Suspended: Boolean = false
+    private var media3WasPausedOnSuspend: Boolean = false
 
     private fun updateMedia3Progress(positionMs: Long, durationMs: Long) {
         if (durationMs <= 0L) return
@@ -2065,24 +2077,42 @@ class PlayerViewModel(
         }
     }
 
-    fun releaseMedia3Player(clearRoute: Boolean = true) {
+    fun releaseMedia3Player(clearRoute: Boolean = true, notify: Boolean = true) {
         media3DubSwitchJob?.cancel()
         media3DubSwitchJob = null
         media3ProgressJob?.cancel()
         media3ProgressJob = null
-        media3Player.release()
-        if (clearRoute) updateStateData { it.copy(isMedia3Playback = false) }
+        media3Player.release(notify = notify)
+        if (clearRoute) {
+            isMedia3Suspended = false
+            media3WasPausedOnSuspend = false
+            updateStateData { it.copy(isMedia3Playback = false) }
+        }
+    }
+
+    fun captureMedia3PrePauseState() {
+        if (stateData.value.isMedia3Playback && !isMedia3Suspended) {
+            media3WasPausedOnSuspend = playbackData.value.paused
+        }
     }
 
     fun suspendMedia3Playback() {
-        if (!stateData.value.isMedia3Playback) return
+        if (!stateData.value.isMedia3Playback || isMedia3Suspended) return
+        isMedia3Suspended = true
         releaseMedia3Player(clearRoute = false)
     }
 
     fun resumeMedia3Playback() {
-        if (!stateData.value.isMedia3Playback) return
+        if (!stateData.value.isMedia3Playback || !isMedia3Suspended) return
+        isMedia3Suspended = false
         val video = stateData.value.currentVideo?.takeIf { it.drm != null } ?: return
-        setMedia3Video(video, playbackData.value.position.toLong())
+        val shouldAutoPlay = !media3WasPausedOnSuspend
+        media3WasPausedOnSuspend = false
+        setMedia3Video(
+            video = video,
+            restoredPositionSeconds = playbackData.value.position.toLong(),
+            autoPlay = shouldAutoPlay,
+        )
     }
     // <-- AM (MEDIA3_DRM_PLAYER)
 
@@ -2960,18 +2990,33 @@ class PlayerViewModel(
      */
     fun changeEpisode(episodeId: Long?, autoPlay: Boolean = false) {
         hasUpdatedSeen.set(false)
+        media3AniSkipAttemptedEpisodeId = null
         if (stateData.value.isCasting) {
             castManager.stopRemoteMediaClient()
             updateCastUiData { it.copy(isLoadingEpisode = true) }
         } else {
             pause()
+            if (stateData.value.isMedia3Playback) {
+                releaseMedia3Player(clearRoute = true, notify = false)
+            } else {
+                media3DubSwitchJob?.cancel()
+                media3DubSwitchJob = null
+                media3ProgressJob?.cancel()
+                media3ProgressJob = null
+            }
             clearTracks()
         }
 
         updateStateData {
             it.copy(
+                isMedia3Playback = false,
                 hosterList = emptyList(),
                 currentVideo = null,
+                chapters = emptyList(),
+                currentChapter = null,
+                aniskipChapters = emptyList(),
+                media3AudioTracks = emptyList(),
+                media3SubtitleTracks = emptyList(),
             )
         }
         updateUiData {
@@ -2981,10 +3026,12 @@ class PlayerViewModel(
                 isLoadingEpisode = true,
                 isLoadingHosters = true,
                 previousPauseState = false,
+                skipIntroText = null,
                 hosterExpandedList = emptyList(),
                 selectedHosterVideoIndex = Pair(-1, -1),
             )
         }
+        updatePlaybackData { it.copy(netflixTimeout = null) }
         cancelHosterVideoLinksJob()
         thumbnailTileCache.clear()
         thumbnailFetchJob?.cancel()
@@ -4495,12 +4542,11 @@ class PlayerViewModel(
      * Only works if tracking is enabled.
      */
     suspend fun aniSkipResponse(playerDuration: Int?): List<TimeStamp>? {
-        val animeId = stateData.value.currentAnime?.id ?: return null
+        val anime = stateData.value.currentAnime ?: return null
         val episodeNumber = stateData.value.currentEpisode?.episodeNumber?.toInt() ?: return null
         val duration = playerDuration ?: return null
 
-        val tracks = getTracks.await(animeId)
-        if (tracks.isNotEmpty()) {
+        suspend fun queryTracks(tracks: List<Track>, epNum: Int): List<TimeStamp>? {
             for (track in tracks) {
                 val tracker = trackerManager.get(track.trackerId)
                 val malId = when (tracker) {
@@ -4509,26 +4555,49 @@ class PlayerViewModel(
                     else -> null
                 }
                 if (malId != null && malId > 0) {
-                    val result = aniSkipApi.getResult(malId.toInt(), episodeNumber, duration.toLong())
+                    val result = aniSkipApi.getResult(malId.toInt(), epNum, duration.toLong())
                     if (result != null) return result
+                }
+            }
+            return null
+        }
+
+        val tracks = getTracks.await(anime.id)
+        if (tracks.isNotEmpty()) {
+            queryTracks(tracks, episodeNumber)?.let { return it }
+        }
+
+        // Fallback 1: resolve MAL ID via AniList GraphQL using current anime/season title
+        if (anime.title.isNotBlank()) {
+            logcat(LogPriority.DEBUG) { "AniSkip: Falling back to title search for '${anime.title}'" }
+            val malId = aniSkipApi.getMalIdFromTitle(anime.title)
+            if (malId != null && malId > 0) {
+                logcat(LogPriority.DEBUG) { "AniSkip: Resolved MAL ID $malId for '${anime.title}'" }
+                aniSkipApi.getResult(malId.toInt(), episodeNumber, duration.toLong())?.let { return it }
+            }
+        }
+
+        // Fallback 2: for seasonal entries, check parent tracks (with season offset) or parent title
+        val parentId = anime.parentId
+        if (parentId != null) {
+            val resolved = trackEpisode.resolveTracking(anime.id, episodeNumber.toDouble())
+            val resolvedEpNum = resolved.targetEpisodeNumber.toInt()
+            if (resolved.tracks.isNotEmpty()) {
+                queryTracks(resolved.tracks, resolvedEpNum)?.let { return it }
+            }
+            val parentTitle = getAnime.await(parentId)?.title
+            if (!parentTitle.isNullOrBlank() && parentTitle != anime.title) {
+                logcat(LogPriority.DEBUG) { "AniSkip: Falling back to parent title search for '$parentTitle'" }
+                val parentMalId = aniSkipApi.getMalIdFromTitle(parentTitle)
+                if (parentMalId != null && parentMalId > 0) {
+                    val targetEp = if (resolvedEpNum > episodeNumber) resolvedEpNum else episodeNumber
+                    aniSkipApi.getResult(parentMalId.toInt(), targetEp, duration.toLong())?.let { return it }
                 }
             }
         }
 
-        // Automatic fallback: resolve MAL ID via AniList GraphQL using anime title
-        val title = stateData.value.currentAnime?.title
-        if (!title.isNullOrBlank()) {
-            logcat(LogPriority.DEBUG) { "AniSkip: Falling back to title search for '$title'" }
-            val malId = aniSkipApi.getMalIdFromTitle(title)
-            if (malId != null && malId > 0) {
-                logcat(LogPriority.DEBUG) { "AniSkip: Resolved MAL ID $malId for '$title'" }
-                val result = aniSkipApi.getResult(malId.toInt(), episodeNumber, duration.toLong())
-                if (result != null) return result
-            }
-        }
-
         logcat(LogPriority.DEBUG) {
-            "AniSkip: No skip times found for anime $animeId (title: $title, ep: $episodeNumber)"
+            "AniSkip: No skip times found for anime ${anime.id} (title: ${anime.title}, ep: $episodeNumber)"
         }
         return null
     }

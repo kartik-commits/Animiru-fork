@@ -87,6 +87,7 @@ class UpdateAnimeFromRemote(
             awaitUpdateFromSource(anime, update.anime, manualFetch)
 
             // AM -->
+            val localEpisodeByUrl = episodes.associateBy { it.url }
             val sourceEpisodes = update.episodes
                 .distinctBy { it.url }
                 .mapIndexed { i, sEpisode ->
@@ -95,7 +96,7 @@ class UpdateAnimeFromRemote(
                         .copy(name = with(EpisodeSanitizer) { sEpisode.name.sanitize(anime.title) })
                         .copy(animeId = anime.id, sourceOrder = i.toLong())
 
-                    val localEpisode = episodes.find { it.url == ep.url }
+                    val localEpisode = localEpisodeByUrl[ep.url]
 
                     val thumbnailLastModified =
                         when {
@@ -127,10 +128,10 @@ class UpdateAnimeFromRemote(
 
             // AM --> Sync playheads & watched status from episode memo if present
             runCatching {
-                val allEpisodes = episodeRepository.getEpisodeByAnimeId(anime.id)
+                val dbEpisodeByUrl = episodeRepository.getEpisodeByAnimeId(anime.id).associateBy { it.url }
                 val updatesToApply = mutableListOf<EpisodeUpdate>()
                 for (sourceEp in sourceEpisodes) {
-                    val dbEp = allEpisodes.find { it.url == sourceEp.url } ?: continue
+                    val dbEp = dbEpisodeByUrl[sourceEp.url] ?: continue
                     val crPlayhead = sourceEp.memo["cr_playhead"]?.jsonPrimitive?.longOrNull
                     val crFullyWatched = sourceEp.memo["cr_fully_watched"]?.jsonPrimitive?.booleanOrNull
                     if (crFullyWatched == true && !dbEp.seen) {

@@ -117,9 +117,6 @@ class PlayerActivity : BaseActivity() {
             playerPreferences.enablePip.get()
     }
 
-    private val isProtectedPlayback: Boolean
-        get() = viewModel.stateData.value.isMedia3Playback
-
     private val canEnterPictureInPicture: Boolean
         get() = isPipSupportedAndEnabled
 
@@ -345,10 +342,7 @@ class PlayerActivity : BaseActivity() {
         }
 
         // AM (MEDIA3_DRM_PLAYER) -->
-        if (viewModel.stateData.value.isMedia3Playback) {
-            viewModel.pause()
-            viewModel.suspendMedia3Playback()
-        }
+        viewModel.captureMedia3PrePauseState()
         // <-- AM (MEDIA3_DRM_PLAYER)
         viewModel.saveHistory()
         viewModel.setPlayerExiting(true)
@@ -366,6 +360,11 @@ class PlayerActivity : BaseActivity() {
         if (isInPictureInPictureMode && powerManager.isInteractive) {
             viewModel.deletePendingEpisodes()
         } else if (!isInPictureInPictureMode) {
+            // AM (MEDIA3_DRM_PLAYER) -->
+            if (!isChangingConfigurations) {
+                viewModel.suspendMedia3Playback()
+            }
+            // <-- AM (MEDIA3_DRM_PLAYER)
             updateDiscordRPC(exitingPlayer = true)
         }
 

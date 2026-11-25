@@ -541,28 +541,6 @@ class AnimeViewModel(
 
     fun selectSeason(seasonId: Long) {
         selectedSeasonId.value = seasonId
-        viewModelScope.launch(Dispatchers.IO) {
-            val localEpisodes = getEpisodesByAnimeId.await(seasonId)
-            if (localEpisodes.isEmpty()) {
-                try {
-                    val state = successState
-                    val source =
-                        state?.source
-                            ?: sourceManager.getOrStub(getAnimeAndEpisodesAndSeasons.awaitAnime(animeId).source)
-                    val seasonAnime = getAnimeAndEpisodesAndSeasons.awaitAnime(seasonId)
-                    if (seasonAnime.fetchType == FetchType.Episodes) {
-                        updateAnimeFromRemote.awaitEpisodesUpdate(
-                            source = source,
-                            anime = seasonAnime,
-                            fetchEpisodes = true,
-                            manualFetch = false,
-                        )
-                    }
-                } catch (e: Exception) {
-                    logcat(LogPriority.ERROR, e)
-                }
-            }
-        }
     }
 
     fun fetchAllFromSource(manualFetch: Boolean = true) {
@@ -2100,20 +2078,19 @@ class AnimeViewModel(
                 // <-- AM
             }
 
+            private val showMissingEpisodes: Boolean
+                get() = !hideMissingEpisodes && (
+                    anime.fetchType == FetchType.Episodes ||
+                        selectedSeasonAnime?.fetchType == FetchType.Episodes
+                    )
+
             val missingItemCount by lazy {
-                if (hideMissingEpisodes || anime.fetchType == FetchType.Seasons) return@lazy 0
-                // AM -->
-                when (anime.fetchType) {
-                    FetchType.Seasons -> 0
-                    FetchType.Episodes -> {
-                        processedEpisodes.fastMap { it.episode.episodeNumber }.missingEntriesCount()
-                    }
-                }
-                // <-- AM
+                if (!showMissingEpisodes) return@lazy 0
+                processedEpisodes.fastMap { it.episode.episodeNumber }.missingEntriesCount()
             }
 
             val episodeListItems by lazy {
-                if (hideMissingEpisodes || anime.fetchType == FetchType.Seasons) {
+                if (!showMissingEpisodes) {
                     return@lazy processedEpisodes
                 }
 
