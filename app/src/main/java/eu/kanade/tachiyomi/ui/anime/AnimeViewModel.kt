@@ -1266,28 +1266,37 @@ class AnimeViewModel(
 
             refreshTrackers()
 
-            val tracks = getTracks.await(animeId)
-            val maxEpisodeNumber = episodes.maxOf { it.episodeNumber }
-            val shouldPromptTrackingUpdate = tracks.any { track -> maxEpisodeNumber > track.lastEpisodeSeen }
+            val resolvedTargets = episodes.groupBy { it.animeId }
+                .map { (targetAnimeId, groupEpisodes) ->
+                    val maxEp = groupEpisodes.maxOf { it.episodeNumber }
+                    trackEpisode.resolveTracking(targetAnimeId, maxEp) to maxEp
+                }
+            val bestTarget = resolvedTargets
+                .filter { (resolved, _) ->
+                    resolved.tracks.any { track -> resolved.targetEpisodeNumber > track.lastEpisodeSeen }
+                }
+                .maxByOrNull { (resolved, _) -> resolved.targetEpisodeNumber }
+                ?: return@launch
 
-            if (!shouldPromptTrackingUpdate) return@launch
+            val (resolved, rawMaxEpisodeNumber) = bestTarget
+            val displayEpisodeNumber = resolved.targetEpisodeNumber.toInt()
             if (autoTrackState == AutoTrackState.ALWAYS) {
-                trackEpisode.await(context, animeId, maxEpisodeNumber)
+                trackEpisode.await(context, resolved.targetAnimeId, rawMaxEpisodeNumber)
                 context.toast(
-                    context.stringResource(AYMR.strings.trackers_updated_summary_anime, maxEpisodeNumber.toInt()),
+                    context.stringResource(AYMR.strings.trackers_updated_summary_anime, displayEpisodeNumber),
                 )
                 return@launch
             }
 
             val result = snackbarHostState.showSnackbar(
-                message = context.stringResource(AYMR.strings.confirm_tracker_update_anime, maxEpisodeNumber.toInt()),
+                message = context.stringResource(AYMR.strings.confirm_tracker_update_anime, displayEpisodeNumber),
                 actionLabel = context.stringResource(MR.strings.action_ok),
                 duration = SnackbarDuration.Short,
                 withDismissAction = true,
             )
 
             if (result == SnackbarResult.ActionPerformed) {
-                trackEpisode.await(context, animeId, maxEpisodeNumber)
+                trackEpisode.await(context, resolved.targetAnimeId, rawMaxEpisodeNumber)
             }
         }
     }
