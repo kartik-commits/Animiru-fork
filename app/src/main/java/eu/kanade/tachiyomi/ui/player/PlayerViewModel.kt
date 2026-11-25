@@ -1863,27 +1863,37 @@ class PlayerViewModel(
         } else {
             emptyList()
         }
-        val rawSubs = video.subtitleTracks.filter {
+        val baseSubs = video.subtitleTracks.filter {
             it.lang != "none" && it.url.isNotBlank()
         }.mapIndexed { index, track ->
-            val isDefault = track.lang.startsWith("en", ignoreCase = true)
             Media3PlayerTrack(
                 trackType = androidx.media3.common.C.TRACK_TYPE_TEXT,
-                groupIndex = 0,
+                groupIndex = -1,
                 trackIndex = index,
                 title = eu.kanade.tachiyomi.ui.player.media3.getLanguageDisplayName(track.lang),
                 language = track.lang,
-                selection = if (isDefault) 0 else -1,
+                selection = -1,
             )
         }
-        val hasSelectedSub = rawSubs.any { it.selection > -1 }
+        val selectedSub = Media3PlaybackUtils.resolveInitialSubtitleTrack(
+            tracks = baseSubs,
+            sessionPreferredLang = media3PreferredSubtitleLang,
+            fallbackSelection = { trackSelect.getPreferredTrackIndex(baseSubs, subtitle = true) },
+        )
+        val rawSubs = baseSubs.map { track ->
+            if (selectedSub != null && track.trackIndex == selectedSub.trackIndex) {
+                track.copy(selection = 0)
+            } else {
+                track
+            }
+        }
         val noneTrack = Media3PlayerTrack(
             trackType = androidx.media3.common.C.TRACK_TYPE_TEXT,
             groupIndex = -1,
             trackIndex = -1,
             title = "None",
             language = "none",
-            selection = if (!hasSelectedSub) 0 else -1,
+            selection = if (selectedSub == null) 0 else -1,
         )
         val initialSubs = listOf(noneTrack) + rawSubs
         updateStateData {
@@ -1902,7 +1912,12 @@ class PlayerViewModel(
         } ?: 0L
         media3ProgressJob?.cancel()
         try {
-            media3Player.load(video, startPosition)
+            media3Player.load(
+                video = video,
+                startPositionSeconds = startPosition,
+                preferredSubtitleLang = selectedSub?.language,
+                subtitlesDisabled = selectedSub == null,
+            )
             media3ProgressJob = viewModelScope.launch {
                 while (stateData.value.isMedia3Playback) {
                     updateMedia3Progress(media3Player.currentPositionMs(), media3Player.durationMs())
@@ -1919,6 +1934,7 @@ class PlayerViewModel(
     }
 
     private var media3AniSkipAttemptedEpisodeId: Long? = null
+    private var media3PreferredSubtitleLang: String? = null
 
     private fun updateMedia3Progress(positionMs: Long, durationMs: Long) {
         if (durationMs <= 0L) return
@@ -1980,6 +1996,23 @@ class PlayerViewModel(
         if (media3Track.trackType == androidx.media3.common.C.TRACK_TYPE_AUDIO && media3Track.url != null) {
             switchMedia3AudioDub(media3Track.url, media3Track.title)
         } else {
+            if (media3Track.trackType == androidx.media3.common.C.TRACK_TYPE_TEXT) {
+                val disableSubs = media3Track.language == "none" || media3Track.selection > -1
+                media3PreferredSubtitleLang = if (disableSubs) "none" else media3Track.language
+                if (media3Track.groupIndex == -1) {
+                    updateStateData { state ->
+                        val updatedSubs = state.media3SubtitleTracks.map { item ->
+                            val selected = if (disableSubs) {
+                                item.language == "none"
+                            } else {
+                                item.trackIndex == media3Track.trackIndex && item.language == media3Track.language
+                            }
+                            item.copy(selection = if (selected) 0 else -1)
+                        }
+                        state.copy(media3SubtitleTracks = updatedSubs)
+                    }
+                }
+            }
             media3Player.selectTrack(media3Track)
         }
     }

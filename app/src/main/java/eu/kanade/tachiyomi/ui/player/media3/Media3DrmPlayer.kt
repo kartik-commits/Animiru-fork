@@ -50,7 +50,12 @@ class Media3DrmPlayer(
         view.player = null
     }
 
-    fun load(video: Video, startPositionSeconds: Long) {
+    fun load(
+        video: Video,
+        startPositionSeconds: Long,
+        preferredSubtitleLang: String? = null,
+        subtitlesDisabled: Boolean = false,
+    ) {
         val drm = video.drm ?: return
         require(video.videoUrl.startsWith("https://")) { "Protected media URL must use HTTPS" }
         require(drm.licenseUrl.startsWith("https://")) { "DRM license URL must use HTTPS" }
@@ -121,24 +126,22 @@ class Media3DrmPlayer(
                 it.lang != "none" && it.url.isNotBlank()
             }.map { track ->
                 val uri = Uri.parse(track.url)
-                val mimeType = if (track.url.contains(".vtt")) {
-                    MimeTypes.TEXT_VTT
-                } else {
-                    MimeTypes.TEXT_SSA
-                }
-                val isEnglish = track.lang.startsWith("en", ignoreCase = true)
+                val mimeType = Media3PlaybackUtils.inferSubtitleMimeType(track.url)
+                val isPreferred = !subtitlesDisabled &&
+                    !preferredSubtitleLang.isNullOrBlank() &&
+                    track.lang.equals(preferredSubtitleLang, ignoreCase = true)
                 MediaItem.SubtitleConfiguration.Builder(uri)
                     .setMimeType(mimeType)
                     .setLanguage(track.lang)
                     .setLabel(getLanguageDisplayName(track.lang))
-                    .setSelectionFlags(if (isEnglish) C.SELECTION_FLAG_DEFAULT else 0)
+                    .setSelectionFlags(if (isPreferred) C.SELECTION_FLAG_DEFAULT else 0)
                     .build()
             }
 
             engine.setMediaItem(
                 MediaItem.Builder()
                     .setUri(video.videoUrl)
-                    .setMimeType(MimeTypes.APPLICATION_MPD)
+                    .setMimeType(Media3PlaybackUtils.inferStreamMimeType(video.videoUrl))
                     .setSubtitleConfigurations(subtitleConfigs)
                     .setDrmConfiguration(
                         MediaItem.DrmConfiguration.Builder(C.WIDEVINE_UUID)
@@ -157,6 +160,13 @@ class Media3DrmPlayer(
                     .setMinVideoSize(0, res)
             } else {
                 params.clearVideoSizeConstraints()
+            }
+            if (subtitlesDisabled) {
+                params.clearOverridesOfType(C.TRACK_TYPE_TEXT)
+                params.setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
+            } else if (!preferredSubtitleLang.isNullOrBlank()) {
+                params.setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false)
+                params.setPreferredTextLanguage(preferredSubtitleLang)
             }
             engine.trackSelectionParameters = params.build()
 
@@ -210,9 +220,22 @@ class Media3DrmPlayer(
             val engine = player ?: return@runOnMainThread
             val parameters = engine.trackSelectionParameters.buildUpon()
             if (track.trackType == C.TRACK_TYPE_TEXT) {
-                if (track.groupIndex == -1 || track.language == "none" || track.selection > -1) {
+                if (track.language == "none" || track.selection > -1) {
                     parameters.clearOverridesOfType(C.TRACK_TYPE_TEXT)
                     parameters.setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
+                } else if (track.groupIndex == -1) {
+                    parameters.clearOverridesOfType(C.TRACK_TYPE_TEXT)
+                    parameters.setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false)
+                    if (track.language.isNotBlank()) {
+                        val matched = findMatchingTextTrack(engine.currentTracks, track.language)
+                        if (matched != null) {
+                            parameters.setOverrideForType(
+                                TrackSelectionOverride(matched.first.mediaTrackGroup, matched.second),
+                            )
+                        } else {
+                            parameters.setPreferredTextLanguage(track.language)
+                        }
+                    }
                 } else {
                     val group = engine.currentTracks.groups.getOrNull(track.groupIndex) ?: return@runOnMainThread
                     parameters.setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false)
@@ -224,6 +247,26 @@ class Media3DrmPlayer(
             }
             engine.trackSelectionParameters = parameters.build()
         }
+    }
+
+    private fun findMatchingTextTrack(tracks: Tracks, language: String): Pair<Tracks.Group, Int>? {
+        val targetBase = language.substringBefore('-')
+        var familyMatch: Pair<Tracks.Group, Int>? = null
+        for (group in tracks.groups) {
+            if (group.type != C.TRACK_TYPE_TEXT) continue
+            for (i in 0 until group.length) {
+                val lang = group.getTrackFormat(i).language.orEmpty()
+                if (lang.equals(language, ignoreCase = true)) {
+                    return group to i
+                }
+                if (familyMatch == null && lang.isNotBlank() &&
+                    lang.substringBefore('-').equals(targetBase, ignoreCase = true)
+                ) {
+                    familyMatch = group to i
+                }
+            }
+        }
+        return familyMatch
     }
 
     fun release(notify: Boolean = true) {

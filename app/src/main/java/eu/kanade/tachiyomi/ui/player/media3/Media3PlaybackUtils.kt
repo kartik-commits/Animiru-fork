@@ -1,5 +1,6 @@
 package eu.kanade.tachiyomi.ui.player.media3
 
+import androidx.media3.common.MimeTypes
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -31,5 +32,43 @@ internal object Media3PlaybackUtils {
         } catch (_: Exception) {
             episodeUrl
         }
+    }
+
+    fun inferStreamMimeType(url: String): String {
+        val path = url.substringBefore('?').substringBefore('#').lowercase()
+        return when {
+            path.endsWith(".m3u8") || path.contains(".m3u8/") -> MimeTypes.APPLICATION_M3U8
+            else -> MimeTypes.APPLICATION_MPD
+        }
+    }
+
+    fun inferSubtitleMimeType(url: String): String {
+        val path = url.substringBefore('?').substringBefore('#').lowercase()
+        return when {
+            path.endsWith(".vtt") -> MimeTypes.TEXT_VTT
+            path.endsWith(".srt") -> MimeTypes.APPLICATION_SUBRIP
+            path.endsWith(".ttml") || path.endsWith(".dfxp") -> MimeTypes.APPLICATION_TTML
+            path.endsWith(".ssa") || path.endsWith(".ass") -> MimeTypes.TEXT_SSA
+            else -> MimeTypes.TEXT_SSA
+        }
+    }
+
+    fun resolveInitialSubtitleTrack(
+        tracks: List<Media3PlayerTrack>,
+        sessionPreferredLang: String?,
+        fallbackSelection: () -> Media3PlayerTrack?,
+    ): Media3PlayerTrack? {
+        if (sessionPreferredLang == "none") return null
+        if (!sessionPreferredLang.isNullOrBlank()) {
+            val exact = tracks.firstOrNull { it.language.equals(sessionPreferredLang, ignoreCase = true) }
+            if (exact != null) return exact
+            val baseLang = sessionPreferredLang.substringBefore('-')
+            val familyMatch = tracks.firstOrNull {
+                it.language.isNotBlank() &&
+                    it.language.substringBefore('-').equals(baseLang, ignoreCase = true)
+            }
+            if (familyMatch != null) return familyMatch
+        }
+        return fallbackSelection()
     }
 }

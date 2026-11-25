@@ -1,9 +1,12 @@
 package eu.kanade.tachiyomi.ui.player.media3
 
+import androidx.media3.common.C
+import androidx.media3.common.MimeTypes
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Test
 
 class Media3PlaybackUtilsTest {
@@ -70,5 +73,49 @@ class Media3PlaybackUtilsTest {
     fun `withUpdatedVersionGuid leaves non-JSON URLs untouched`() {
         val rawUrl = "https://example.com/watch/ep-1"
         assertEquals(rawUrl, Media3PlaybackUtils.withUpdatedVersionGuid(rawUrl, "G-123"))
+    }
+
+    @Test
+    fun `inferStreamMimeType detects HLS m3u8 with query string and defaults to DASH mpd`() {
+        assertEquals(
+            MimeTypes.APPLICATION_M3U8,
+            Media3PlaybackUtils.inferStreamMimeType("https://cdn.example.com/master.m3u8?Policy=abc"),
+        )
+        assertEquals(
+            MimeTypes.APPLICATION_MPD,
+            Media3PlaybackUtils.inferStreamMimeType("https://cdn.example.com/manifest.mpd?Policy=abc"),
+        )
+    }
+
+    @Test
+    fun `inferSubtitleMimeType detects vtt srt ttml and falls back to ssa`() {
+        assertEquals(
+            MimeTypes.TEXT_VTT,
+            Media3PlaybackUtils.inferSubtitleMimeType("https://cdn.example.com/subs/en-US.vtt?token=1"),
+        )
+        assertEquals(
+            MimeTypes.APPLICATION_SUBRIP,
+            Media3PlaybackUtils.inferSubtitleMimeType("https://cdn.example.com/subs/es.SRT"),
+        )
+        assertEquals(
+            MimeTypes.APPLICATION_TTML,
+            Media3PlaybackUtils.inferSubtitleMimeType("https://cdn.example.com/subs/fr.ttml#fragment"),
+        )
+        assertEquals(
+            MimeTypes.TEXT_SSA,
+            Media3PlaybackUtils.inferSubtitleMimeType("https://cdn.example.com/subs/en-US.ass?token=1"),
+        )
+    }
+
+    @Test
+    fun `resolveInitialSubtitleTrack honors none override exact match family match and fallback`() {
+        val en = Media3PlayerTrack(C.TRACK_TYPE_TEXT, -1, 0, "English", "en-US", -1)
+        val esLa = Media3PlayerTrack(C.TRACK_TYPE_TEXT, -1, 1, "Spanish (Latin America)", "es-419", -1)
+        val tracks = listOf(en, esLa)
+
+        assertNull(Media3PlaybackUtils.resolveInitialSubtitleTrack(tracks, "none") { en })
+        assertEquals(esLa, Media3PlaybackUtils.resolveInitialSubtitleTrack(tracks, "es-419") { en })
+        assertEquals(esLa, Media3PlaybackUtils.resolveInitialSubtitleTrack(tracks, "es-ES") { en })
+        assertEquals(esLa, Media3PlaybackUtils.resolveInitialSubtitleTrack(tracks, null) { esLa })
     }
 }
