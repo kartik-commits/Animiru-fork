@@ -90,6 +90,7 @@ import eu.kanade.tachiyomi.ui.player.domain.BrightnessManager
 import eu.kanade.tachiyomi.ui.player.loader.EpisodeLoader
 import eu.kanade.tachiyomi.ui.player.loader.HosterLoader
 import eu.kanade.tachiyomi.ui.player.media3.Media3DrmPlayer
+import eu.kanade.tachiyomi.ui.player.media3.Media3PlaybackUtils
 import eu.kanade.tachiyomi.ui.player.media3.Media3PlayerTrack
 import eu.kanade.tachiyomi.ui.player.mpv.ChapterNode
 import eu.kanade.tachiyomi.ui.player.mpv.MPVPlayer
@@ -1764,40 +1765,6 @@ class PlayerViewModel(
             )
         }
 
-        // AM (MEDIA3_DRM_PLAYER) -->
-        val currentVid = stateData.value.currentVideo
-        val isSameMedia3Stream = !uiData.value.isLoadingEpisode &&
-            stateData.value.isMedia3Playback &&
-            currentVid?.drm != null &&
-            currentVid.videoUrl == video.videoUrl &&
-            selectedHosterState.name == eu.kanade.tachiyomi.animesource.model.Hoster.NO_HOSTER_LIST
-
-        if (isSameMedia3Stream && currentVid != null) {
-            val dubSuffix = if (currentVid.videoTitle.contains(" [")) {
-                " [" + currentVid.videoTitle.substringAfterLast(" [")
-            } else {
-                ""
-            }
-            val newTitle = video.videoTitle.replace(Regex("""\[.*?\]"""), "").trim() + dubSuffix
-            val resolvedVideo = currentVid.copy(
-                resolution = video.resolution,
-                videoTitle = newTitle,
-            )
-            updateHosterStateAt(
-                index = hosterIndex,
-                state = selectedHosterState.getChangedAt(videoIndex, resolvedVideo, Video.State.READY),
-            )
-            updateStateData { it.copy(currentVideo = resolvedVideo) }
-            qualityIndex = Pair(hosterIndex, videoIndex)
-            withContext(Dispatchers.Main) {
-                media3Player.setVideoResolution(resolvedVideo.resolution)
-                updateUiData { it.copy(selectedHosterVideoIndex = Pair(hosterIndex, videoIndex)) }
-                dismissSheet()
-            }
-            return true
-        }
-        // <-- AM (MEDIA3_DRM_PLAYER)
-
         // Pause until everything has loaded
         pause()
 
@@ -2038,7 +2005,7 @@ class PlayerViewModel(
             baseEpUrl
         }
 
-        val cleanTitle = currentVideo.videoTitle.replace(Regex("""\[.*?\]"""), "").trim().ifBlank { "Auto (Adaptive)" }
+        val cleanTitle = Media3PlaybackUtils.stripBracketSuffixes(currentVideo.videoTitle)
         val newVideo = currentVideo.copy(
             videoTitle = "$cleanTitle [$dubTitle]",
             videoUrl = newUrl,
@@ -2352,11 +2319,19 @@ class PlayerViewModel(
             media3Player.setVideoResolution(video.resolution)
             qualityIndex = Pair(hosterIndex, videoIndex)
             updateUiData { it.copy(selectedHosterVideoIndex = Pair(hosterIndex, videoIndex)) }
-            val updatedVideo = stateData.value.currentVideo?.copy(
+            val currentVid = stateData.value.currentVideo
+            val updatedVideo = currentVid?.copy(
                 resolution = video.resolution,
-                videoTitle = video.videoTitle,
+                videoTitle = Media3PlaybackUtils.mergeQualityWithActiveDub(
+                    qualityTitle = video.videoTitle,
+                    activeTitle = currentVid.videoTitle,
+                ),
             )
             if (updatedVideo != null) {
+                updateHosterStateAt(
+                    index = hosterIndex,
+                    state = hosterState.getChangedAt(videoIndex, updatedVideo, Video.State.READY),
+                )
                 updateStateData { it.copy(currentVideo = updatedVideo) }
             }
             if (uiData.value.sheetShown == Sheets.QualityTracks ||
