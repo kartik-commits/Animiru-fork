@@ -106,6 +106,7 @@ import eu.kanade.tachiyomi.util.editThumbnail
 import eu.kanade.tachiyomi.util.episode.filterDownloaded
 import eu.kanade.tachiyomi.util.lang.byteSize
 import eu.kanade.tachiyomi.util.lang.takeBytes
+import eu.kanade.tachiyomi.util.source.SourcePlayheadSync
 import eu.kanade.tachiyomi.util.storage.DiskUtil
 import eu.kanade.tachiyomi.util.storage.cacheImageDir
 import eu.kanade.tachiyomi.util.system.getWanIp
@@ -1142,20 +1143,16 @@ class PlayerViewModel(
                 withContext(Dispatchers.IO) {
                     try {
                         withTimeoutOrNull(3000L) {
-                            val isFullyWatchedMethod = source.javaClass.getMethod(
-                                "isEpisodeFullyWatched",
-                                String::class.java,
-                            )
-                            val fullyWatched = isFullyWatchedMethod.invoke(source, episode.url) as? Boolean
-                            if (fullyWatched == true) {
-                                effectiveEpisode = effectiveEpisode.copy(seen = true)
-                                updateEpisode(effectiveEpisode.id) { it.copy(seen = true) }
-                                updateEpisode.await(EpisodeUpdate(effectiveEpisode.id) { seen = true })
-                            } else {
-                                val getPlayheadMethod = source.javaClass.getMethod("getPlayhead", String::class.java)
-                                val remotePosSeconds = getPlayheadMethod.invoke(source, episode.url) as? Long
-                                if (remotePosSeconds != null && remotePosSeconds > 0) {
-                                    val posMs = (remotePosSeconds * 1000).toInt()
+                            val remoteState = SourcePlayheadSync.fetchPlayheadState(source, episode.url)
+                            if (remoteState != null) {
+                                if (remoteState.isFullyWatched) {
+                                    effectiveEpisode = effectiveEpisode.copy(seen = true)
+                                    updateEpisode(effectiveEpisode.id) { it.copy(seen = true) }
+                                    updateEpisode.await(EpisodeUpdate(effectiveEpisode.id) { seen = true })
+                                } else if (remoteState.playheadSeconds > 0L) {
+                                    val posMs = (remoteState.playheadSeconds * 1000L)
+                                        .coerceAtMost(Int.MAX_VALUE.toLong())
+                                        .toInt()
                                     if (posMs > effectiveEpisode.lastSecondSeen) {
                                         effectiveEpisode = effectiveEpisode.copy(lastSecondSeen = posMs)
                                         updateEpisode(effectiveEpisode.id) { it.copy(lastSecondSeen = posMs) }
@@ -1168,9 +1165,8 @@ class PlayerViewModel(
                                 }
                             }
                         }
-                    } catch (_: NoSuchMethodException) {
-                        // Source doesn't implement remote playheads
                     } catch (e: Throwable) {
+                        if (e is CancellationException) throw e
                         logcat(LogPriority.WARN, e) { "Failed to pull remote playhead from source" }
                     }
                 }
@@ -3953,21 +3949,20 @@ class PlayerViewModel(
         if (source != null && !stateData.value.incognitoMode) {
             val shouldSync = !onComplete || !hasUpdatedSeen.get()
             if (shouldSync) {
-                try {
-                    val savePlayheadMethod = source.javaClass.getMethod(
-                        "savePlayhead",
-                        String::class.java,
-                        java.lang.Long.TYPE,
-                        java.lang.Long.TYPE,
-                        java.lang.Boolean.TYPE,
-                    )
-                    val posSec = (episode.lastSecondSeen / 1000L).coerceAtLeast(0L)
-                    val totalSec = (episode.totalSeconds / 1000L).coerceAtLeast(0L)
-                    savePlayheadMethod.invoke(source, episode.url, posSec, totalSec, onComplete)
-                } catch (_: NoSuchMethodException) {
-                    // Source does not implement savePlayhead
-                } catch (e: Throwable) {
-                    logcat(LogPriority.WARN, e) { "Failed to sync playhead to source" }
+                val posSec = (episode.lastSecondSeen / 1000L).coerceAtLeast(0L)
+                val totalSec = (episode.totalSeconds / 1000L).coerceAtLeast(0L)
+                appScope.launch(Dispatchers.IO) {
+                    try {
+                        SourcePlayheadSync.savePlayhead(
+                            source = source,
+                            episodeUrl = episode.url,
+                            positionSeconds = posSec,
+                            totalSeconds = totalSec,
+                            fullyWatched = onComplete,
+                        )
+                    } catch (e: Throwable) {
+                        logcat(LogPriority.WARN, e) { "Failed to sync playhead to source" }
+                    }
                 }
             }
         }

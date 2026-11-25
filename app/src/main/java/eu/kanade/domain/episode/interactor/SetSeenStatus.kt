@@ -2,6 +2,7 @@ package eu.kanade.domain.episode.interactor
 
 import dev.zacsweers.metro.Inject
 import eu.kanade.domain.download.interactor.DeleteDownload
+import eu.kanade.tachiyomi.util.source.SourcePlayheadSync
 import logcat.LogPriority
 import tachiyomi.core.common.util.system.logcat
 import tachiyomi.domain.anime.model.Anime
@@ -67,34 +68,7 @@ class SetSeenStatus(
             runCatching {
                 val anime = animeRepository.getAnimeById(animeId) ?: return@forEach
                 val source = sourceManager.getOrStub(anime.source)
-                try {
-                    val batchMethod = source.javaClass.getMethod(
-                        "setEpisodesSeen",
-                        List::class.java,
-                        java.lang.Boolean.TYPE,
-                    )
-                    batchMethod.invoke(source, episodes.map { it.url }, seen)
-                } catch (_: NoSuchMethodException) {
-                    for (ep in episodes) {
-                        try {
-                            if (seen) {
-                                val markMethod = source.javaClass.getMethod(
-                                    "savePlayhead",
-                                    String::class.java,
-                                    java.lang.Long.TYPE,
-                                    java.lang.Long.TYPE,
-                                    java.lang.Boolean.TYPE,
-                                )
-                                markMethod.invoke(source, ep.url, 0L, 0L, true)
-                            } else {
-                                val deleteMethod = source.javaClass.getMethod("deletePlayhead", String::class.java)
-                                deleteMethod.invoke(source, ep.url)
-                            }
-                        } catch (_: NoSuchMethodException) {
-                            // Source does not support playhead sync
-                        }
-                    }
-                }
+                SourcePlayheadSync.setEpisodesSeen(source, episodes.map { it.url }, seen)
             }
         }
         // <-- AM
