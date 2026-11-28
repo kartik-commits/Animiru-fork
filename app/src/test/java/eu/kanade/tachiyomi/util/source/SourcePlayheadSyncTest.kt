@@ -15,6 +15,9 @@ class SourcePlayheadSyncTest {
         var legacyPlayheadCalls = 0
         var savedCalls = mutableListOf<List<Any?>>()
         var batchCalls = mutableListOf<Pair<List<String>, Boolean>>()
+        var pausedCalls = 0
+        var resumedPositions = mutableListOf<Long>()
+        var stoppedCalls = 0
 
         @Suppress("unused")
         fun getPlayheadState(episodeUrl: String): LongArray {
@@ -42,6 +45,21 @@ class SourcePlayheadSyncTest {
         @Suppress("unused")
         fun setEpisodesSeen(episodeUrls: List<String>, seen: Boolean) {
             batchCalls.add(episodeUrls to seen)
+        }
+
+        @Suppress("unused")
+        fun onPlaybackPaused() {
+            pausedCalls++
+        }
+
+        @Suppress("unused")
+        fun onPlaybackResumed(positionSeconds: Long) {
+            resumedPositions.add(positionSeconds)
+        }
+
+        @Suppress("unused")
+        fun onPlaybackStopped() {
+            stoppedCalls++
         }
     }
 
@@ -143,6 +161,23 @@ class SourcePlayheadSyncTest {
         val source = SingleCallSource()
         SourcePlayheadSync.savePlayhead(source, "ep-9", 120L, 1440L, false)
         assertEquals(listOf(listOf<Any?>("ep-9", 120L, 1440L, false)), source.savedCalls)
+    }
+
+    @Test
+    fun `playback lifecycle notifications invoke source methods and no-op when absent`() {
+        val source = SingleCallSource()
+        SourcePlayheadSync.notifyPlaybackPaused(source)
+        SourcePlayheadSync.notifyPlaybackResumed(source, 321L)
+        SourcePlayheadSync.notifyPlaybackStopped(source)
+
+        assertEquals(1, source.pausedCalls)
+        assertEquals(listOf(321L), source.resumedPositions)
+        assertEquals(1, source.stoppedCalls)
+
+        val plain = PlainSource()
+        SourcePlayheadSync.notifyPlaybackPaused(plain)
+        SourcePlayheadSync.notifyPlaybackResumed(plain, 10L)
+        SourcePlayheadSync.notifyPlaybackStopped(plain)
     }
 
     @Test

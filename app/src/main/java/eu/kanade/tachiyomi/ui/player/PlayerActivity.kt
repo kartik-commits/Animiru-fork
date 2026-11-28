@@ -315,7 +315,7 @@ class PlayerActivity : BaseActivity() {
 
     override fun onDestroy() {
         // AM (MEDIA3_DRM_PLAYER) -->
-        viewModel.releaseMedia3Player()
+        viewModel.releaseMedia3Player(stopRemoteSession = !isChangingConfigurations)
         // <-- AM (MEDIA3_DRM_PLAYER)
         viewModel.player.release()
         viewModel.stopHttpServer()
@@ -349,6 +349,9 @@ class PlayerActivity : BaseActivity() {
         if (isFinishing) {
             viewModel.deletePendingEpisodes()
             viewModel.mpvCommand("stop")
+            // AM (MEDIA3_DRM_PLAYER) -->
+            viewModel.stopRemotePlaybackSession()
+            // <-- AM (MEDIA3_DRM_PLAYER)
         } else {
             viewModel.pause()
         }
@@ -361,7 +364,7 @@ class PlayerActivity : BaseActivity() {
             viewModel.deletePendingEpisodes()
         } else if (!isInPictureInPictureMode) {
             // AM (MEDIA3_DRM_PLAYER) -->
-            if (!isChangingConfigurations) {
+            if (!isChangingConfigurations && !isFinishing) {
                 viewModel.suspendMedia3Playback()
             }
             // <-- AM (MEDIA3_DRM_PLAYER)

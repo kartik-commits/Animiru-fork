@@ -23,6 +23,9 @@ internal object SourcePlayheadSync {
         val savePlayhead: Method?,
         val deletePlayhead: Method?,
         val setEpisodesSeen: Method?,
+        val onPlaybackPaused: Method?,
+        val onPlaybackResumed: Method?,
+        val onPlaybackStopped: Method?,
     )
 
     private val methodCache = ConcurrentHashMap<Class<*>, CachedMethods>()
@@ -99,6 +102,21 @@ internal object SourcePlayheadSync {
         }
     }
 
+    fun notifyPlaybackPaused(source: Any) {
+        val method = methodsFor(source.javaClass).onPlaybackPaused ?: return
+        invokeUnwrapped(method, source)
+    }
+
+    fun notifyPlaybackResumed(source: Any, positionSeconds: Long) {
+        val method = methodsFor(source.javaClass).onPlaybackResumed ?: return
+        invokeUnwrapped(method, source, positionSeconds)
+    }
+
+    fun notifyPlaybackStopped(source: Any) {
+        val method = methodsFor(source.javaClass).onPlaybackStopped ?: return
+        invokeUnwrapped(method, source)
+    }
+
     private fun methodsFor(clazz: Class<*>): CachedMethods =
         methodCache.computeIfAbsent(clazz) { target ->
             CachedMethods(
@@ -118,6 +136,9 @@ internal object SourcePlayheadSync {
                     List::class.java,
                     java.lang.Boolean.TYPE,
                 ),
+                onPlaybackPaused = target.findMethodOrNull("onPlaybackPaused"),
+                onPlaybackResumed = target.findMethodOrNull("onPlaybackResumed", java.lang.Long.TYPE),
+                onPlaybackStopped = target.findMethodOrNull("onPlaybackStopped"),
             )
         }
 

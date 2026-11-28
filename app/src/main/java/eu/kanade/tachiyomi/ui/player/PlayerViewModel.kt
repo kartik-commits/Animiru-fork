@@ -307,6 +307,7 @@ class PlayerViewModel(
 
             override fun onEnded() {
                 updatePlaybackData { it.copy(paused = true) }
+                stopRemotePlaybackSession()
                 eofReached(true)
             }
 
@@ -315,6 +316,7 @@ class PlayerViewModel(
                 media3ProgressJob = null
                 updateUiData { it.copy(isLoadingEpisode = false) }
                 updatePlaybackData { it.copy(paused = true) }
+                notifyRemotePlaybackPaused()
                 viewModelScope.launch { _eventFlow.emit(Event.Media3Error(errorCode)) }
             }
 
@@ -1763,7 +1765,7 @@ class PlayerViewModel(
         }
 
         // Pause until everything has loaded
-        pause()
+        pauseInternal(notifyRemoteSession = false)
 
         val resolvedVideo = if (selectedHosterState.videoState[videoIndex] != Video.State.READY) {
             hosterLoader.getResolvedVideo(source, video)
@@ -1848,7 +1850,7 @@ class PlayerViewModel(
         if (stateData.value.isCasting || castManager.castState.value.isConnected) {
             castManager.disconnect()
         }
-        pause()
+        pauseInternal(notifyRemoteSession = false)
         mpvCommand("stop")
         onResetTransform()
         val externalDubs = video.audioTracks
@@ -2077,7 +2079,12 @@ class PlayerViewModel(
         }
     }
 
-    fun releaseMedia3Player(clearRoute: Boolean = true, notify: Boolean = true) {
+    fun releaseMedia3Player(
+        clearRoute: Boolean = true,
+        notify: Boolean = true,
+        stopRemoteSession: Boolean = clearRoute,
+    ) {
+        val wasMedia3Playback = stateData.value.isMedia3Playback
         media3DubSwitchJob?.cancel()
         media3DubSwitchJob = null
         media3ProgressJob?.cancel()
@@ -2087,6 +2094,9 @@ class PlayerViewModel(
             isMedia3Suspended = false
             media3WasPausedOnSuspend = false
             updateStateData { it.copy(isMedia3Playback = false) }
+            if (stopRemoteSession && wasMedia3Playback) {
+                stopRemotePlaybackSession()
+            }
         }
     }
 
@@ -2098,8 +2108,12 @@ class PlayerViewModel(
 
     fun suspendMedia3Playback() {
         if (!stateData.value.isMedia3Playback || isMedia3Suspended) return
+        val wasAlreadyPaused = media3WasPausedOnSuspend || playbackData.value.paused
         isMedia3Suspended = true
-        releaseMedia3Player(clearRoute = false)
+        if (!wasAlreadyPaused) {
+            notifyRemotePlaybackPaused()
+        }
+        releaseMedia3Player(clearRoute = false, stopRemoteSession = false)
     }
 
     fun resumeMedia3Playback() {
@@ -2108,11 +2122,42 @@ class PlayerViewModel(
         val video = stateData.value.currentVideo?.takeIf { it.drm != null } ?: return
         val shouldAutoPlay = !media3WasPausedOnSuspend
         media3WasPausedOnSuspend = false
+        val restoredPos = playbackData.value.position.toLong().coerceAtLeast(0L)
+        if (shouldAutoPlay) {
+            notifyRemotePlaybackResumed(restoredPos)
+        }
         setMedia3Video(
             video = video,
-            restoredPositionSeconds = playbackData.value.position.toLong(),
+            restoredPositionSeconds = restoredPos,
             autoPlay = shouldAutoPlay,
         )
+    }
+
+    private fun notifyRemotePlaybackPaused() {
+        val source = stateData.value.currentSource ?: return
+        if (!stateData.value.isMedia3Playback) return
+        appScope.launch(Dispatchers.IO) {
+            runCatching { SourcePlayheadSync.notifyPlaybackPaused(source) }
+                .onFailure { logcat(LogPriority.WARN, it) { "Failed to notify remote playback pause" } }
+        }
+    }
+
+    private fun notifyRemotePlaybackResumed(positionSeconds: Long) {
+        val source = stateData.value.currentSource ?: return
+        if (!stateData.value.isMedia3Playback) return
+        appScope.launch(Dispatchers.IO) {
+            runCatching {
+                SourcePlayheadSync.notifyPlaybackResumed(source, positionSeconds.coerceAtLeast(0L))
+            }.onFailure { logcat(LogPriority.WARN, it) { "Failed to notify remote playback resume" } }
+        }
+    }
+
+    fun stopRemotePlaybackSession() {
+        val source = stateData.value.currentSource ?: return
+        appScope.launch(Dispatchers.IO) {
+            runCatching { SourcePlayheadSync.notifyPlaybackStopped(source) }
+                .onFailure { logcat(LogPriority.WARN, it) { "Failed to stop remote playback session" } }
+        }
     }
     // <-- AM (MEDIA3_DRM_PLAYER)
 
@@ -2995,7 +3040,7 @@ class PlayerViewModel(
             castManager.stopRemoteMediaClient()
             updateCastUiData { it.copy(isLoadingEpisode = true) }
         } else {
-            pause()
+            pauseInternal(notifyRemoteSession = false)
             if (stateData.value.isMedia3Playback) {
                 releaseMedia3Player(clearRoute = true, notify = false)
             } else {
@@ -3096,9 +3141,16 @@ class PlayerViewModel(
         mpvCommand("cycle", "pause")
     }
     fun pause() {
+        pauseInternal(notifyRemoteSession = true)
+    }
+
+    private fun pauseInternal(notifyRemoteSession: Boolean) {
         // AM (MEDIA3_DRM_PLAYER) -->
         if (stateData.value.isMedia3Playback) {
             media3Player.pause()
+            if (notifyRemoteSession) {
+                notifyRemotePlaybackPaused()
+            }
         } else {
             setPropertyBoolean("pause", true)
         }
@@ -3111,6 +3163,8 @@ class PlayerViewModel(
         // AM (MEDIA3_DRM_PLAYER) -->
         if (stateData.value.isMedia3Playback) {
             media3Player.play()
+            val posSec = (media3Player.currentPositionMs() / 1000L).coerceAtLeast(0L)
+            notifyRemotePlaybackResumed(posSec)
         } else {
             setPropertyBoolean("pause", false)
         }
@@ -3883,6 +3937,9 @@ class PlayerViewModel(
     // === Aniyomi ===
 
     override fun onCleared() {
+        if (stateData.value.isMedia3Playback) {
+            stopRemotePlaybackSession()
+        }
         stateData.value.currentEpisode?.let {
             updateEpisodeProgress(it)
             saveEpisodeProgress()
